@@ -39,5 +39,7 @@ cursor = db_handle.cursor()
 while x := cursor.next():
     print(x)
 
+print(db_handle.get(b"hsallllllllllllllllqwerf"))
+
 # Close the database connection
 db_handle.close()
