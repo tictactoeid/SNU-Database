@@ -2,6 +2,8 @@ import sys
 from lark import Lark, Transformer, UnexpectedToken
 from berkeleydb import db
 
+DEBUG = False # TODO: make it False
+
 with open("grammar.lark") as grammar:
     sql_parser = Lark(grammar.read(), start="command", lexer="basic")
 
@@ -12,7 +14,6 @@ metadata.open('./DB/metadata.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
 class SQLTransformer(Transformer): # lark transformer class
     def create_table_query(self, items): # called when 'CREATE TABLE' query requested well
         # CREATE TABLE table_name table_element_list
-        # TODO: 예외 처리
 
         table_name = items[2].children[0].lower()
         column_definition_iter = items[3].find_data("column_definition")
@@ -143,32 +144,196 @@ class SQLTransformer(Transformer): # lark transformer class
         }
         metadata.put(table_name.encode(), str(table_schema).encode())
         print("DB_2020-15127> \'" + table_name + "\' table is created") # CreateTableSuccess
-
-        #cursor = metadata.cursor() # TODO: delete this (for debug)
-        #while x := cursor.next():
-        #    print(x)
+        if DEBUG:
+            cursor = metadata.cursor()
+            while x := cursor.next():
+                print(x)
 
     def drop_table_query(self, items):
-        print("DB_2020-15127> \'DROP TABLE\' requested")
+        table_name = items[2].children[0].lower()
 
+        table_schema = metadata.get(table_name.encode())
+        if table_schema is None:
+            # NoSuchTable
+            print("DB_2020-15127> No such table")
+            return
+        table_schema = eval(table_schema.decode())
+        columns = table_schema["columns"]
+        fk_list = table_schema["foreign_key"]
+
+        cursor = metadata.cursor()
+        while x := cursor.next():
+            key, value = x
+            current_table_schema = eval(value.decode())
+            current_columns = current_table_schema["columns"]
+            for col_dict in current_columns:
+                try:
+                    if col_dict["fk_ref_table"] == table_name:
+                        # DropReferencedTableError
+                        print("DB_2020-15127> Drop table has failed: \'" + table_name + "\' is referenced by other table")
+                        return
+                except KeyError:
+                    pass
+        metadata.delete(table_name.encode())
+        print("DB_2020-15127> \'" + table_name + "\' table is dropped")
+
+        if DEBUG:
+            cursor = metadata.cursor()
+            while x := cursor.next():
+                print(x)
     def explain_query(self, items):
-        print("DB_2020-15127> \'EXPLAIN\' requested")
+        table_name = items[1].children[0].lower()
+        table_schema = metadata.get(table_name.encode())
+        if table_schema is None:
+            # NoSuchTable
+            print("DB_2020-15127> No such table")
+            return
+        table_schema = eval(table_schema.decode())
+        columns = table_schema["columns"]
+        pk_list = table_schema["primary_key"]
+        fk_list = table_schema["foreign_key"]
+
+        print("-----------------------------------------------------------------")
+        print("table name [" + table_name + "]")
+        format = '%-15s%-15s%-15s%-15s'
+        str_out = format % ("column_name", "type", "null", "key")
+        print(str_out)
+        for col_dict in columns:
+            column_name = col_dict["column_name"]
+            type = col_dict["type"]
+            nullable = col_dict["nullable"]
+
+            if type == "char":
+                length = col_dict["length"]
+                type_str = type + '(' + str(length) + ')'
+            else:
+                type_str = type
+
+            if nullable:
+                nullable_str = 'Y'
+            else:
+                nullable_str = 'N'
+
+            if column_name in pk_list and column_name in fk_list:
+                key = "PRI/FOR"
+            elif column_name in pk_list:
+                key = "PRI"
+            elif column_name in fk_list:
+                key = "FOR"
+            else:
+                key = ""
+
+            str_out = format % (column_name, type_str, nullable_str, key)
+            print(str_out)
+        print("-----------------------------------------------------------------")
+
     def describe_query(self, items):
-        print("DB_2020-15127> \'DESCRIBE\' requested")
+        self.explain_query(items)
 
     def desc_query(self, items):
-        print("DB_2020-15127> \'DESC\' requested")
+        self.explain_query(items)
 
     def insert_query(self, items):
-        print("DB_2020-15127> \'INSERT\' requested")
+        table_name = items[2].children[0].lower()
 
+        table_schema = metadata.get(table_name.encode())
+        if table_schema is None:
+            # NoSuchTable
+            print("DB_2020-15127> No such table")
+            return
+        table_schema = eval(table_schema.decode())
+        columns = table_schema["columns"]
+        pk_list = table_schema["primary_key"]
+        fk_list = table_schema["foreign_key"]
+        column_list = []
+        for col_dict in columns:
+            column_list.append(col_dict["column_name"])
+
+        table_db = db.DB()
+        table_db.open('./DB/' + table_name + '.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
+
+        cursor = table_db.cursor()
+        tuple_id = 0
+        while x := cursor.next():
+            tuple_id += 1
+
+        column_order_query = []
+        if not items[3]: # [(col_name1, col_name2, … )] has omitted
+            column_order_query = column_list
+        else:
+            column_tree = items[3].children[1:-1]
+            for x in column_tree:
+                column_order_query.append(x.children[0].lower())
+
+        values_tree = items[5].children[1:-1]
+        values = []
+        for x in values_tree:
+            values.append(x.children[0].lower())
+        values_dict = {}
+        for col in column_list:
+            values_dict[col] = values[column_order_query.index(col)]
+        table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy
+
+        if DEBUG:
+            cursor = table_db.cursor()
+            while x := cursor.next():
+                print(x)
+
+        table_db.close()
+        print("DB_2020-15127> The row is inserted")
     def delete_query(self, items):
         print("DB_2020-15127> \'DELETE\' requested")
     def select_query(self, items):
-        print("DB_2020-15127> \'SELECT\' requested")
+        table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()
+        table_schema = metadata.get(table_name.encode())
+        if table_schema is None:
+            # NoSuchTable
+            print("DB_2020-15127> No such table")
+            return
+        table_schema = eval(table_schema.decode())
+        table_db = db.DB()
+        table_db.open('./DB/' + table_name + '.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
+        column_list = []
+        for col_dict in table_schema["columns"]:
+            column_list.append(col_dict["column_name"])
+
+        column_count = len(column_list)
+        for i in range(column_count):
+            print("+", end='')
+            print('-' * 15, end='')
+        print('+')
+        strFormat = '| %-13s '
+        for col in column_list:
+            print(strFormat % col, end='')
+        print('|')
+        for i in range(column_count):
+            print("+", end='')
+            print('-' * 15, end='')
+        print('+')
+
+        cursor = table_db.cursor()
+        while x := cursor.next():
+            key, value = x
+            tuple_dict = eval(value.decode())
+            for col in column_list:
+                print(strFormat % tuple_dict[col], end='')
+            print('|')
+
+        for i in range(column_count):
+            print("+", end='')
+            print('-' * 15, end='')
+        print('+')
+
+        table_db.close()
 
     def show_tables_query(self, items):
-        print("DB_2020-15127> \'SHOW TABLES\' requested")
+        print("------------------------")
+        cursor = metadata.cursor()
+        while x := cursor.next():
+            key, value = x
+            print(key.decode())
+        print("------------------------")
+
     def update_query(self, items):
         print("DB_2020-15127> \'UPDATE\' requested")
 

@@ -29,3 +29,6 @@ for query in querys[0:-1]:
     output = sql_parser.parse(query+';')
     transformer.transform(output)
     print(output)
+
+#sql_parser.parse(
+     #   'create table account (account_number int not null, branch_name char(15), primary key(account_number), foreign key(branch_name) references table_name1(ID));')
