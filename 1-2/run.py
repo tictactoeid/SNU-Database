@@ -78,12 +78,14 @@ class SQLTransformer(Transformer): # lark transformer class
                     ref_table = fk_dict.get(column_name)[0]
                     ref_column = fk_dict.get(column_name)[1]
 
-                    ref_table_schema = metadata.get(fk_ref_table.encode())
+                    ref_table_schema = metadata.get(ref_table.encode())
                     if ref_table_schema is None:
                         # ReferenceTableExistenceError
                         print("DB_2020-15127> Create table has failed: foreign key references non existing table")
                         return
                     flag_ = False
+
+                    ref_table_schema = eval(ref_table_schema.decode())
                     for col_dict in ref_table_schema["columns"]:
                         if col_dict.get("column_name") == ref_column:
                             flag_ = True
@@ -91,14 +93,18 @@ class SQLTransformer(Transformer): # lark transformer class
                                 # ReferenceTypeError
                                 print("DB_2020-15127> Create table has failed: foreign key references wrong type")
                                 return
-                            if ref_column not in col_dict.get("primary_key"):
+                            elif not ref_table_schema.get("primary_key"): # no primary key
                                 # ReferenceNonPrimaryKeyError
                                 print("DB_2020-15127> Create table has failed: foreign key references non primary key column")
                                 return
-                        if not flag_:
-                            # ReferenceColumnExistenceError
-                            print("DB_2020-15127> Create table has failed: foreign key references non existing column")
-                            return
+                            elif ref_column not in ref_table_schema.get("primary_key"):
+                                # ReferenceNonPrimaryKeyError
+                                print("DB_2020-15127> Create table has failed: foreign key references non primary key column")
+                                return
+                    if not flag_:
+                        # ReferenceColumnExistenceError
+                        print("DB_2020-15127> Create table has failed: foreign key references non existing column")
+                        return
 
                     column_dict["fk_ref_table"] = ref_table
                     column_dict["fk_ref_column"] = ref_column
@@ -107,26 +113,27 @@ class SQLTransformer(Transformer): # lark transformer class
         fk_list = []
         for fk_dict in foreign_keys:
             fk_list += list(fk_dict.keys())
-
         col_list = []
         for col_dict in columns:
-            col_list += list(col_dict.keys())
-
+            col_list.append(col_dict["column_name"])
         for fk_name in fk_list:
             if fk_name not in col_list:
                 # NonExistingColumnDefError
-                print("DB_2020-15127> Create table has failed: \'[" + fk_name + "]\' does not exist in column definition")
+                print("DB_2020-15127> Create table has failed: \'" + fk_name + "\' does not exist in column definition")
                 return
+
         for pk_name in primary_keys:
             if pk_name not in col_list:
                 # NonExistingColumnDefError
-                print("DB_2020-15127> Create table has failed: \'[" + pk_name + "]\' does not exist in column definition")
+                print("DB_2020-15127> Create table has failed: \'" + pk_name + "\' does not exist in column definition")
                 return
-            if pk_name not in fk_list:
-                # composite primary key의 일부만을 reference
-                # ReferenceNonPrimaryKeyError
-                print("DB_2020-15127> Create table has failed: foreign key references non primary key column")
-                return
+        if fk_list: # foreign key exists
+            for ref_pk in ref_table_schema.get("primary_key"):
+                if ref_pk not in fk_list:
+                    # composite primary key의 일부만을 reference
+                    # ReferenceNonPrimaryKeyError
+                    print("DB_2020-15127> Create table has failed: foreign key references non primary key column")
+                    return
 
         table_schema = {
             "table_name" : table_name,
@@ -137,9 +144,9 @@ class SQLTransformer(Transformer): # lark transformer class
         metadata.put(table_name.encode(), str(table_schema).encode())
         print("DB_2020-15127> \'" + table_name + "\' table is created") # CreateTableSuccess
 
-        cursor = metadata.cursor() # TODO: delete this (for debug)
-        while x := cursor.next():
-            print(x)
+        #cursor = metadata.cursor() # TODO: delete this (for debug)
+        #while x := cursor.next():
+        #    print(x)
 
     def drop_table_query(self, items):
         print("DB_2020-15127> \'DROP TABLE\' requested")
