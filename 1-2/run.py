@@ -178,9 +178,9 @@ class SQLTransformer(Transformer): # lark transformer class
                         return
                 except KeyError:
                     pass
-        metadata.delete(table_name.encode())
+        metadata.delete(table_name.encode()) # delete schema
         try:
-            os.remove('./DB/' + table_name + '.db')
+            os.remove('./DB/' + table_name + '.db') # delete data if exists
         except FileNotFoundError:
             pass
         print("DB_2020-15127> \'" + table_name + "\' table is dropped")
@@ -196,7 +196,7 @@ class SQLTransformer(Transformer): # lark transformer class
             # NoSuchTable
             print("DB_2020-15127> No such table")
             return
-        table_schema = eval(table_schema.decode())
+        table_schema = eval(table_schema.decode()) # get table schema
         columns = table_schema["columns"]
         pk_list = table_schema["primary_key"]
         fk_list = table_schema["foreign_key"]
@@ -280,7 +280,7 @@ class SQLTransformer(Transformer): # lark transformer class
         values_dict = {}
         for col in column_list:
             values_dict[col] = values[column_order_query.index(col)]
-        table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy
+        table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy, inserting value!
 
         if DEBUG:
             cursor = table_db.cursor()
