@@ -10,8 +10,10 @@ with open("grammar.lark") as grammar:
 if not os.path.exists('./DB'):
     os.makedirs('./DB')
 metadata = db.DB()
-metadata.open('./DB/metadata.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
+metadata.open('./DB/metadata .db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
 # table schema metadata file
+# "metadata"라는 이름의 table과의 conflict를 막기 위해 파일명에 공백 삽입
+
 
 class SQLTransformer(Transformer): # lark transformer class
     def create_table_query(self, items): # called when 'CREATE TABLE' query requested well
