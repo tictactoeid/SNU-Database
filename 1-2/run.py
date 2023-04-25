@@ -1,4 +1,4 @@
-import sys
+import sys, os
 from lark import Lark, Transformer, UnexpectedToken
 from berkeleydb import db
 
@@ -7,6 +7,8 @@ DEBUG = False # TODO: make it False
 with open("grammar.lark") as grammar:
     sql_parser = Lark(grammar.read(), start="command", lexer="basic")
 
+if not os.path.exists('./DB'):
+    os.makedirs('./DB')
 metadata = db.DB()
 metadata.open('./DB/metadata.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
 # table schema metadata file
@@ -74,7 +76,7 @@ class SQLTransformer(Transformer): # lark transformer class
                 column_dict["length"] = length
 
             for fk_dict in foreign_keys:
-                if column_name in fk_dict: # TODO: error handling about foreign key
+                if column_name in fk_dict:
                     # {{fk_col_name : [ref_table_name, ref_table_name]}
                     ref_table = fk_dict.get(column_name)[0]
                     ref_column = fk_dict.get(column_name)[1]
@@ -175,6 +177,10 @@ class SQLTransformer(Transformer): # lark transformer class
                 except KeyError:
                     pass
         metadata.delete(table_name.encode())
+        try:
+            os.remove('./DB/' + table_name + '.db')
+        except FileNotFoundError:
+            pass
         print("DB_2020-15127> \'" + table_name + "\' table is dropped")
 
         if DEBUG:
