@@ -11,12 +11,21 @@ RP : ")"
 DQ : "\""
 SQ : "'"
 
+
+
 // Tokens
 STR : DQ _STRING_ESC_INNER DQ | SQ _STRING_ESC_INNER SQ
 DATE.9 : N N N N "-" N N "-" N N
 IDENTIFIER : C (C | "_")*
 
 // Keywords
+LESSTHAN : "<"
+LESSEQUAL : "<="
+GREATERTHAN: ">"
+GREATEREQUAL : ">="
+EQUAL: "="
+NOTEQUAL: "!="
+
 TYPE_INT : "int"i
 TYPE_CHAR : "char"i
 TYPE_DATE : "date"i
@@ -40,7 +49,7 @@ AS : "as"i
 IS : "is"i
 OR : "or"i
 AND : "and"i
-comp_op : "<" | ">" | "=" | ">=" | "<=" | "!="
+comp_op : LESSTHAN | LESSEQUAL | EQUAL | GREATERTHAN | GREATEREQUAL | NOTEQUAL
 INSERT : "insert"i
 INTO : "into"i
 VALUES : "values"i
@@ -117,7 +126,7 @@ predicate : comparison_predicate
 comparison_predicate : comp_operand comp_op comp_operand
 comp_operand : comparable_value
              | [table_name "."] column_name
-comparable_value : INT | STR | DATE
+comparable_value : INT | STR | DATE | NULL
 null_predicate : [table_name "."] column_name null_operation
 null_operation : IS [NOT] NULL
 
@@ -125,7 +134,7 @@ null_operation : IS [NOT] NULL
 // INSERT
 insert_query : INSERT INTO table_name [column_name_list] VALUES value_list
 value_list : LP value ("," value)* RP
-value : INT | STR | DATE
+value : INT | STR | DATE | NULL
 
 // DELETE
 delete_query : DELETE FROM table_name [where_clause]

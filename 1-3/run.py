@@ -1,8 +1,8 @@
 import sys, os
-from lark import Lark, Transformer, UnexpectedToken
+from lark import Lark, Transformer, UnexpectedToken, UnexpectedCharacters, UnexpectedInput, UnexpectedEOF
 from berkeleydb import db
 
-DEBUG = False # TODO: make it False
+DEBUG = True # TODO: make it False
 
 with open("grammar.lark") as grammar:
     sql_parser = Lark(grammar.read(), start="command", lexer="basic")
@@ -299,11 +299,63 @@ class SQLTransformer(Transformer): # lark transformer class
 
         values_tree = items[5].children[1:-1]
         values = []
+        values_type = []
         for x in values_tree:
             values.append(x.children[0].lower())
+            values_type.append(x.children[0].type.lower())
+
+        # TODO : check if valid
+
+        if len(column_order_query) != len(values):
+            # InsertTypeMismatchError
+            # column과 value의 수가 불일치
+            # column을 명시하지 않았을 때도 포함
+            print("DB_2020-15127> Insertion has failed: Types are not matched")
+            return
+
+        # TODO: InsertColumnExistenceError(#colName) 여기서 먼저 처리해야 함
+
+        for col_query in column_order_query:
+            if col_query not in column_list:
+                # InsertColumnExistenceError(#colName)
+                print("DB_2020-15127> Insertion has failed: \'" + col_query + "\' does not exist")
+                return
+
         values_dict = {}
+        values_type_dict = {}
         for col in column_list:
             values_dict[col] = values[column_order_query.index(col)]
+            values_type_dict[col] = values_type[column_order_query.index(col)]
+        # {"id" : 10, "name" : "jimin"}
+
+
+        for col in values_dict:
+            value_current = values_dict[col]
+            value_type_current = values_type_dict[col]
+            for col_dict in columns:
+                if col_dict["column_name"] == col:
+                    type_current = col_dict["type"]
+                    nullable_current = col_dict["nullable"]
+                    if type_current == "char":
+                        length_current = col_dict["length"]
+                    else:
+                        length_current = None
+                    break
+            if (value_type_current == "str" and type_current != "char") or (value_type_current == "int" and type_current != "int") or (value_type_current == "date" and type_current != "date"):
+                # InsertTypeMismatchError
+                # column과 value의 type이 불일치
+                print("DB_2020-15127> Insertion has failed: Types are not matched")
+                return
+            if not nullable_current and str(value_current).lower() == "null":
+                # InsertColumnNonNullableError(#colName)
+                print("DB_2020-15127> Insertion has failed: \'" + col + "\' is not nullable")
+                return
+            if type_current == "char" and len(value_current) > length_current:
+                print(length_current)
+                values_dict[col] = "\'" + value_current[1:length_current+1] + "\'" # truncate
+
+
+
         table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy, inserting value!
 
         if DEBUG:
@@ -316,7 +368,95 @@ class SQLTransformer(Transformer): # lark transformer class
 
     # TODO: implement this
     def delete_query(self, items):
-        print("DB_2020-15127> \'DELETE\' requested")
+        # DELETE FROM table_name [where_clause]
+        # WHERE boolean_expr
+
+        table_name = items[2].children[0].lower()
+        table_schema = metadata.get(table_name.encode())
+        if table_schema is None:
+            # NoSuchTable
+            print("DB_2020-15127> No such table")
+            return
+        table_schema = eval(table_schema.decode())
+
+        columns = table_schema["columns"]
+        column_list = []
+        for col_dict in columns:
+            column_list.append(col_dict["column_name"])
+
+        table_db = db.DB()
+        table_db.open('./DB/' + table_name + '.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
+
+        if not items[3]: # [where_clause] has omitted
+            # delete all tuples
+            cursor = table_db.cursor()
+            cnt = 0
+            while x := cursor.next():
+                key, value = x
+                table_db.delete(key)
+                cnt += 1
+            print("DB_2020-15127> \'" + cnt + "\' row(s) are deleted")
+            return
+        comparison_predicate_iter = items[3].find_data("comparison_predicate")
+        comparisons = []
+        for i in comparison_predicate_iter:
+            # comp_operand comp_op comp_operand
+            operator = i.children[1].children[0].value
+            if i.children[0].children[0]:
+                if i.children[0].children[0].data == "table_name":
+                    operand_1 = {"type" : "column_name", "table_name" : i.children[0].children[0].value.lower(), "column_name" : i.children[0].children[1].value.lower()}
+                elif i.children[0].children[0].data == "comparable_value":
+                    operand_1 = {"type" : "comparable_value", "value" : i.children[0].children[0].children[0].data, "compare_type" : i.children[0].children[0].children[0].type.lower()}
+            else:
+                # i.children[0].children[0] is None
+                # table_name omitted
+                operand_1 = {"type" : "column_name", "table_name" : None, "column_name" : i.children[0].children[1].value.lower()}
+
+            if i.children[2].children[0]:
+                if i.children[2].children[0].data == "table_name":
+                    operand_2 = {"type": "column_name", "table_name": i.children[2].children[0].value.lower(),
+                                 "column_name": i.children[0].children[1].value.lower()}
+                elif i.children[2].children[0].data == "comparable_value":
+                    operand_2 = {"type" : "comparable_value", "value" : i.children[2].children[0].children[0].data, "compare_type" : i.children[2].children[0].children[0].type.lower()}
+            else:
+                operand_2 = {"type": "column_name", "table_name": None, "column_name": i.children[2].children[1].value.lower()}
+
+            if operand_1["type"]  == "column_name":
+                if operand_1["table_name"] and operand_1["table_name"] != table_name:
+                    # WhereTableNotSpecified
+                    print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                    return
+                if operand_1["column_name"] not in column_list:
+                    # WhereColumnNotExist
+                    print("DB_2020-15127> Where clause trying to reference non existing column")
+                    return
+                for col_dict in columns:
+                    if col_dict["column_name"] == operand_1["column_name"]:
+                        operand_1["compare_type"] = col_dict["type"]
+                        break
+
+            if operand_2["type"]  == "column_name":
+                if operand_2["table_name"] and operand_1["table_name"] != table_name:
+                    # WhereTableNotSpecified
+                    print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                    return
+                if operand_2["column_name"] not in column_list:
+                    # WhereColumnNotExist
+                    print("DB_2020-15127> Where clause trying to reference non existing column")
+                    return
+                for col_dict in columns:
+                    if col_dict["column_name"] == operand_2["column_name"]:
+                        operand_2["compare_type"] = col_dict["type"]
+                        break
+
+            if operand_1["compare_type"] == "null" or operand_2["compare_type"] == "null":
+                pass
+            elif operand_1["compare_type"] != operand_2["compare_type"]:
+                # WhereIncomparableError
+                print("DB_2020-15127> Where clause trying to compare incomparable values")
+                return
+            comparisons.append([operand_1, operator, operand_2])
+
 
     # TODO: implement this
     def select_query(self, items):
@@ -389,6 +529,23 @@ while True: # prompt
             transformer.transform(output)
         except UnexpectedToken as E:
             print("DB_2020-15127> Syntax error")
+            if DEBUG:
+                print(E)
+            break
+        except UnexpectedCharacters as E:
+            print("DB_2020-15127> Syntax error")
+            if DEBUG:
+                print(E)
+            break
+        except UnexpectedEOF as E:
+            print("DB_2020-15127> Syntax error")
+            if DEBUG:
+                print(E)
+            break
+        except UnexpectedInput as E:
+            print("DB_2020-15127> Syntax error")
+            if DEBUG:
+                print(E)
             break
 
 metadata.close()
