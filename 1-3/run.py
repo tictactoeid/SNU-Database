@@ -1,4 +1,6 @@
 import sys, os
+import time
+
 from lark import Lark, Transformer, UnexpectedToken, UnexpectedCharacters, UnexpectedInput, UnexpectedEOF, Tree, Token
 from berkeleydb import db
 
@@ -441,8 +443,7 @@ class SQLTransformer(Transformer): # lark transformer class
                         operand_2 = ComparisonOperand(type="column_name", table_name=i.children[2].children[0].children[0].value, column_name=i.children[2].children[1].children[0].value)
                     elif i.children[2].children[0].data == "comparable_value":
                         operand_2 = ComparisonOperand(type="comparable_value", value=i.children[2].children[0].children[0].value, comparable_value_type=i.children[2].children[0].children[0].type)
-                else: # i.children[0].children[0] is None
-                    # table_name has omitted
+                else:
                     operand_2 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[2].children[1].children[0].value)
 
                 if operand_1.type == "column_name":
@@ -486,13 +487,24 @@ class SQLTransformer(Transformer): # lark transformer class
                 # column_name, table_name = None, is_not_null = False
                 column_name_current = i.children[1].children[0].value
                 if i.children[0]:
-                    table_name_current = i.children[0].children[0].value
+                    table_name_current = i.children[0].children[0].value.lower()
+                    if table_name_current != table_name:
+                        # WhereTableNotSpecified
+                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                        return
                 else: # [table_name] has omitted
                     table_name_current = None
+
+                if column_name_current not in column_list:
+                    # WhereColumnNotExist
+                    print("DB_2020-15127> Where clause trying to reference non existing column")
+                    return
+
                 if i.children[2].children[1]: # is NOT null
                     is_not_null = True
                 else: # is null
                     is_not_null = False
+
                 where_clause.append(NullPredicate(column_name=column_name_current, table_name=table_name_current, is_not_null=is_not_null))
 
             elif i.data == "and_op":
@@ -507,71 +519,74 @@ class SQLTransformer(Transformer): # lark transformer class
                 print(i, end=" ")
             print()
 
-        """
-        # dummy code
-        comparison_predicate_iter = items[3].find_data("comparison_predicate")
-        comparisons = []
-        for i in comparison_predicate_iter:
-            # comp_operand comp_op comp_operand
-            operator = i.children[1].children[0].value
-            if i.children[0].children[0]:
-                if i.children[0].children[0].data == "table_name":
-                    operand_1 = {"type" : "column_name", "table_name" : i.children[0].children[0].value.lower(), "column_name" : i.children[0].children[1].value.lower()}
-                elif i.children[0].children[0].data == "comparable_value":
-                    operand_1 = {"type" : "comparable_value", "value" : i.children[0].children[0].children[0].data, "compare_type" : i.children[0].children[0].children[0].type.lower()}
-            else:
-                # i.children[0].children[0] is None
-                # table_name omitted
-                operand_1 = {"type" : "column_name", "table_name" : None, "column_name" : i.children[0].children[1].value.lower()}
+        max = 0
+        cursor = table_db.cursor()
+        cnt = 0
+        while x := cursor.next():
+            key, value = x
+            tuple_dict = eval(value)
+            where_clause_result = []
+            for idx in range(len(where_clause)):
+                predicate = where_clause[idx]
+                if isinstance(predicate, ComparisonPredicate):
+                    if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME:
+                        operand_1_value = tuple_dict[predicate.operand_1.column_name]
+                    else:
+                        operand_1_value = tuple_dict[predicate.operand_1.value]
 
-            if i.children[2].children[0]:
-                if i.children[2].children[0].data == "table_name":
-                    operand_2 = {"type": "column_name", "table_name": i.children[2].children[0].value.lower(),
-                                 "column_name": i.children[0].children[1].value.lower()}
-                elif i.children[2].children[0].data == "comparable_value":
-                    operand_2 = {"type" : "comparable_value", "value" : i.children[2].children[0].children[0].data, "compare_type" : i.children[2].children[0].children[0].type.lower()}
-            else:
-                operand_2 = {"type": "column_name", "table_name": None, "column_name": i.children[2].children[1].value.lower()}
+                    if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
+                        operand_2_value = tuple_dict[predicate.operand_2.column_name]
+                    else:
+                        operand_2_value = tuple_dict[predicate.operand_2.value]
 
-            if operand_1["type"]  == "column_name":
-                if operand_1["table_name"] and operand_1["table_name"] != table_name:
-                    # WhereTableNotSpecified
-                    print("DB_2020-15127> Where clause trying to reference tables which are not specified")
-                    return
-                if operand_1["column_name"] not in column_list:
-                    # WhereColumnNotExist
-                    print("DB_2020-15127> Where clause trying to reference non existing column")
-                    return
-                for col_dict in columns:
-                    if col_dict["column_name"] == operand_1["column_name"]:
-                        operand_1["compare_type"] = col_dict["type"]
-                        break
+                    if operand_1_value == ThreeValuedLogic.NULL or operand_2_value == ThreeValuedLogic.NULL:
+                        result = ThreeValuedLogic.UNKNOWN
+                    else:
+                        # TODO: consider datetime comparison
+                        if predicate.operand_1.comparable_value_type == "date":
+                            operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
+                            operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
+                        if operator == ComparisonPredicate.LESSTHAN:
+                            if operand_1_value < operand_2_value:
+                                result = ThreeValuedLogic.TRUE
+                            else:
+                                result = ThreeValuedLogic.FALSE
+                        elif operator == ComparisonPredicate.LESSEQUAL:
+                            if operand_1_value <= operand_2_value:
+                                result = ThreeValuedLogic.TRUE
+                            else:
+                                result = ThreeValuedLogic.FALSE
+                        elif operator == ComparisonPredicate.GREATERTHAN:
+                            if operand_1_value > operand_2_value:
+                                result = ThreeValuedLogic.TRUE
+                            else:
+                                result = ThreeValuedLogic.FALSE
+                        elif operator == ComparisonPredicate.GREATEREQUAL:
+                            if operand_1_value >= operand_2_value:
+                                result = ThreeValuedLogic.TRUE
+                            else:
+                                result = ThreeValuedLogic.FALSE
+                        elif operator == ComparisonPredicate.EQUAL:
+                            if operand_1_value == operand_2_value:
+                                result = ThreeValuedLogic.TRUE
+                            else:
+                                result = ThreeValuedLogic.FALSE
+                        elif operator == ComparisonPredicate.NOTEQUAL:
+                            if operand_1_value != operand_2_value:
+                                result = ThreeValuedLogic.TRUE
+                            else:
+                                result = ThreeValuedLogic.FALSE
 
-            if operand_2["type"]  == "column_name":
-                if operand_2["table_name"] and operand_1["table_name"] != table_name:
-                    # WhereTableNotSpecified
-                    print("DB_2020-15127> Where clause trying to reference tables which are not specified")
-                    return
-                if operand_2["column_name"] not in column_list:
-                    # WhereColumnNotExist
-                    print("DB_2020-15127> Where clause trying to reference non existing column")
-                    return
-                for col_dict in columns:
-                    if col_dict["column_name"] == operand_2["column_name"]:
-                        operand_2["compare_type"] = col_dict["type"]
-                        break
+                elif isinstance(predicate, NullPredicate):
+                    pass # TODO
+                else:
+                    result = predicate
+                where_clause.append(result)
 
-            if operand_1["compare_type"] == "null" or operand_2["compare_type"] == "null":
-                pass
-            elif operand_1["compare_type"] != operand_2["compare_type"]:
-                # WhereIncomparableError
-                print("DB_2020-15127> Where clause trying to compare incomparable values")
-                return
-            comparisons.append([operand_1, operator, operand_2])
-            # dummy code end
-            """
+            table_db.delete(key)
+            cnt += 1
 
-    # TODO: implement this
+
     def select_query(self, items):
         table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()
         table_schema = metadata.get(table_name.encode())

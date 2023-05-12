@@ -1,7 +1,8 @@
-class ThreeValuedLogic():
+class ThreeValuedLogic:
     TRUE = "true"
     FALSE = "false"
     UNKNOWN = "unknown"
+    NULL = "null"
     inputs = [TRUE, FALSE, UNKNOWN]
     def ThreeValuedOR(self, operand_1, operand_2):
         if operand_1 not in self.inputs or operand_2 not in self.inputs:
@@ -37,7 +38,6 @@ class ThreeValuedLogic():
             return self.TRUE
         else:
             return self.UNKNOWN
-
 
 
 

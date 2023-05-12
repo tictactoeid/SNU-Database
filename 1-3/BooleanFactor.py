@@ -40,6 +40,13 @@ class ComparisonOperand:
             return str(self.value)
 
 class ComparisonPredicate:
+    # operators
+    LESSTHAN = "<"
+    LESSEQUAL = "<="
+    GREATERTHAN = ">"
+    GREATEREQUAL = ">="
+    EQUAL = "="
+    NOTEQUAL = "!="
     def __init__(self, operand_1, operator, operand_2):
         self.operand_1 = operand_1
         self.operator = operator
