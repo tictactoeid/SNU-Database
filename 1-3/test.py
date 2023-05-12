@@ -370,12 +370,12 @@ class SQLTransformer(Transformer): # lark transformer class
 
     # TODO: implement this
     def delete_query(self, items):
-        print(items[3].pretty())
+        #print(items[3].pretty())
         #print(items[3].children[1])
         #iter = items[3].find_data("comp_op")
         #for i in iter:
         #    print(i)
-        iter2 = items[3].find_data("comparison_predicate")
+        #iter2 = items[3].find_data("comparison_predicate")
         #for i in iter2:
             #print(i) # comp_operand comp_op comp_operand
             #print(i.children[0].children[0]) # table name 생략 시 이게 None, error 발생
@@ -390,22 +390,22 @@ class SQLTransformer(Transformer): # lark transformer class
             #print(i.children[2].children[0].data) # comparable_value
 
             #print(i.children[2].children[0].children[0].type)
-        iter3 = items[3].find_data("predicate")
-        for i in iter3:
-            depth = get_depth(items[3], i)
-            print(i)
-            print(f"Depth of the node: {depth}")
+        #iter3 = items[3].find_data("predicate")
+       # for i in iter3:
+        #    depth = get_depth(items[3], i)
+       #     print(i)
+        #    print(f"Depth of the node: {depth}")
 
-        print(get_depth(items[3], "and"))
-        print(get_depth(items[3], "or"))
-        print(get_depth(items[3], "not"))
+        #print(get_depth(items[3], "and"))
+        #print(get_depth(items[3], "or"))
+        #print(get_depth(items[3], "not"))
 
-        iteristhispossible = find_data(items[3], ["and_op", "or_op", "not_op", "predicate"])
+        #iteristhispossible = find_data(items[3], ["and_op", "or_op", "not_op", "predicate"])
             #lambda x: x == "and_op" or x=="or_op" or x=="not_op")
-        for j in iteristhispossible:
-            print(j)
+        #for j in iteristhispossible:
+        #    print(j)
 
-        iternull = items[3].find_data("null_predicate")
+        """iternull = items[3].find_data("null_predicate")
         for i in iternull:
             print()
             print(i)
@@ -414,16 +414,21 @@ class SQLTransformer(Transformer): # lark transformer class
             print(i.children[2].children[0].value) # is
             print(i.children[2].children[1]) # [not] or None
             print(i.children[2].children[2].value) # null
-            print()
-
-        #print(get_depth(items[3], "or_clause"))
-        #print(get_depth(items[3], "and_clause_first"))
-        #print(get_depth(items[3], "and_clause_second"))
-
-        #print(get_depth(items[3], "or"))
-        #print(get_depth(items[3], "and"))
-
-
+            print() """
+        where_clause = []
+        where_iter = find_data(items[3], ["and_op", "or_op", "not_op", "comparison_predicate", "null_predicate"])
+        for i in where_iter:
+            if i.data == "comparison_predicate":  # comp_operand comp_op comp_operand
+                print(i.pretty())
+                print(i.children[2].children[0])
+                print(i.children[0].children[0].children[0])  # value
+                print(i.children[0].children[0].children[0].type)  # comp_val_type
+                #if i.children[0].children[0] and i.children[0].children[1].data == "column_name":
+                print(i.children[1].children[0]) # operator
+                print(i.children[0].children[0].children[0]) # table_name
+                print(i.children[0].children[1].children[0]) # col_name
+                #elif i.children[0].children[1].data != "column_name":
+                print()
 
 
 

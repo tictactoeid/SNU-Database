@@ -429,22 +429,21 @@ class SQLTransformer(Transformer): # lark transformer class
                 operator = i.children[1].children[0].value
                 if i.children[0].children[0]:
                     if i.children[0].children[0].data == "table_name":
-                        operand_1 = ComparisonOperand(type="column_name", table_name=i.children[0].children[0].value, column_name=i.children[0].children[1].value)
+                        operand_1 = ComparisonOperand(type="column_name", table_name=i.children[0].children[0].children[0].value, column_name=i.children[0].children[1].children[0].value)
                     elif i.children[0].children[0].data == "comparable_value":
-                        operand_1 = ComparisonOperand(type="comparable_value", value=i.children[0].children[0].children[0].data, comparable_value_type=i.children[0].children[0].children[0].type)
-                else:
-                    # i.children[0].children[0] is None
+                        operand_1 = ComparisonOperand(type="comparable_value", value=i.children[0].children[0].children[0].value, comparable_value_type=i.children[0].children[0].children[0].type)
+                else: # i.children[0].children[0] is None
                     # table_name has omitted
-                    operand_1 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[0].children[1].value)
+                    operand_1 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[0].children[1].children[0].value)
 
                 if i.children[2].children[0]:
                     if i.children[2].children[0].data == "table_name":
-                        operand_2 = ComparisonOperand(type="column_name", table_name=i.children[2].children[0].value, column_name=i.children[2].children[1].value)
+                        operand_2 = ComparisonOperand(type="column_name", table_name=i.children[2].children[0].children[0].value, column_name=i.children[2].children[1].children[0].value)
                     elif i.children[2].children[0].data == "comparable_value":
-                        operand_2 = ComparisonOperand(type="comparable_value", value=i.children[2].children[0].children[0].data, comparable_value_type=i.children[2].children[0].children[0].type)
-                else:
-                    operand_2 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[2].children[1].value)
-
+                        operand_2 = ComparisonOperand(type="comparable_value", value=i.children[2].children[0].children[0].value, comparable_value_type=i.children[2].children[0].children[0].type)
+                else: # i.children[0].children[0] is None
+                    # table_name has omitted
+                    operand_2 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[2].children[1].children[0].value)
 
                 if operand_1.type == "column_name":
                     if operand_1.table_name and operand_1.table_name != table_name:
@@ -503,6 +502,10 @@ class SQLTransformer(Transformer): # lark transformer class
             elif i.data == "not_op":
                 where_clause.append(BooleanOperator(type="not", depth=get_depth(items[3], i)))
 
+        if DEBUG:
+            for i in where_clause:
+                print(i, end=" ")
+            print()
 
         """
         # dummy code
