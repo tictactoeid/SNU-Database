@@ -1,6 +1,9 @@
 import sys, os
-from lark import Lark, Transformer, UnexpectedToken, UnexpectedCharacters, UnexpectedInput, UnexpectedEOF
+from lark import Lark, Transformer, UnexpectedToken, UnexpectedCharacters, UnexpectedInput, UnexpectedEOF, Tree, Token
 from berkeleydb import db
+
+from BooleanFactor import *
+from ThreeValuedLogic import *
 
 DEBUG = True # TODO: make it False
 
@@ -13,6 +16,27 @@ metadata = db.DB()
 metadata.open('./DB/metadata_.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
 # table schema metadata file
 
+def find_data_multiple(root, fields):
+    # tree.find_data()릏 여러 data를 찾을 수 있도록 확장
+    result = []
+    if root.data in fields:
+        result.append(root)
+    for child in root.children:
+        if isinstance(child, Tree):
+            result.extend(find_data_multiple(child, fields))
+    return result
+def get_depth(root, target, depth = 0):
+    # tree에서 특정 node의 depth 찾기
+    if isinstance(root, Tree):
+        if root == target:
+            return depth
+        for child in root.children:
+            result = get_depth(child, target, depth+1)
+            if result is not None:
+                return result
+    elif isinstance(root, Token) and root == target:
+        return depth
+    return None
 
 class SQLTransformer(Transformer): # lark transformer class
     def create_table_query(self, items): # called when 'CREATE TABLE' query requested well
@@ -397,6 +421,91 @@ class SQLTransformer(Transformer): # lark transformer class
                 cnt += 1
             print("DB_2020-15127> \'" + cnt + "\' row(s) are deleted")
             return
+
+        where_clause = []
+        where_iter = find_data_multiple(items[3], ["and_op", "or_op", "not_op", "comparison_predicate", "null_predicate"])
+        for i in where_iter:
+            if i.data == "comparison_predicate":  # comp_operand comp_op comp_operand
+                operator = i.children[1].children[0].value
+                if i.children[0].children[0]:
+                    if i.children[0].children[0].data == "table_name":
+                        operand_1 = ComparisonOperand(type="column_name", table_name=i.children[0].children[0].value, column_name=i.children[0].children[1].value)
+                    elif i.children[0].children[0].data == "comparable_value":
+                        operand_1 = ComparisonOperand(type="comparable_value", value=i.children[0].children[0].children[0].data, comparable_value_type=i.children[0].children[0].children[0].type)
+                else:
+                    # i.children[0].children[0] is None
+                    # table_name has omitted
+                    operand_1 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[0].children[1].value)
+
+                if i.children[2].children[0]:
+                    if i.children[2].children[0].data == "table_name":
+                        operand_2 = ComparisonOperand(type="column_name", table_name=i.children[2].children[0].value, column_name=i.children[2].children[1].value)
+                    elif i.children[2].children[0].data == "comparable_value":
+                        operand_2 = ComparisonOperand(type="comparable_value", value=i.children[2].children[0].children[0].data, comparable_value_type=i.children[2].children[0].children[0].type)
+                else:
+                    operand_2 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[2].children[1].value)
+
+
+                if operand_1.type == "column_name":
+                    if operand_1.table_name and operand_1.table_name != table_name:
+                        # WhereTableNotSpecified
+                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                        return
+                    if operand_1.column_name not in column_list:
+                        # WhereColumnNotExist
+                        print("DB_2020-15127> Where clause trying to reference non existing column")
+                        return
+                    for col_dict in columns:
+                        if col_dict["column_name"] == operand_1.column_name:
+                            operand_1.comparable_value_type = col_dict["type"]
+                            break
+
+                if operand_2.type == "column_name":
+                    if operand_2.table_name and operand_2.table_name != table_name:
+                        # WhereTableNotSpecified
+                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                        return
+                    if operand_2.column_name not in column_list:
+                        # WhereColumnNotExist
+                        print("DB_2020-15127> Where clause trying to reference non existing column")
+                        return
+                    for col_dict in columns:
+                        if col_dict["column_name"] == operand_2.column_name:
+                            operand_2.comparable_value_type = col_dict["type"]
+                            break
+
+                if operand_1.comparable_value_type == "null" or operand_2.comparable_value_type == "null":
+                    pass
+                elif operand_1.comparable_value_type != operand_2.comparable_value_type:
+                    # WhereIncomparableError
+                    print("DB_2020-15127> Where clause trying to compare incomparable values")
+                    return
+                where_clause.append(ComparisonPredicate(operand_1=operand_1, operator=operator, operand_2=operand_2))
+
+            elif i.data == "null_predicate":
+                # [table_name "."] column_name null_operation
+                # column_name, table_name = None, is_not_null = False
+                column_name_current = i.children[1].children[0].value
+                if i.children[0]:
+                    table_name_current = i.children[0].children[0].value
+                else: # [table_name] has omitted
+                    table_name_current = None
+                if i.children[2].children[1]: # is NOT null
+                    is_not_null = True
+                else: # is null
+                    is_not_null = False
+                where_clause.append(NullPredicate(column_name=column_name_current, table_name=table_name_current, is_not_null=is_not_null))
+
+            elif i.data == "and_op":
+                where_clause.append(BooleanOperator(type="and", depth=get_depth(items[3], i)))
+            elif i.data == "or_op":
+                where_clause.append(BooleanOperator(type="or", depth=get_depth(items[3], i)))
+            elif i.data == "not_op":
+                where_clause.append(BooleanOperator(type="not", depth=get_depth(items[3], i)))
+
+
+        """
+        # dummy code
         comparison_predicate_iter = items[3].find_data("comparison_predicate")
         comparisons = []
         for i in comparison_predicate_iter:
@@ -456,7 +565,8 @@ class SQLTransformer(Transformer): # lark transformer class
                 print("DB_2020-15127> Where clause trying to compare incomparable values")
                 return
             comparisons.append([operand_1, operator, operand_2])
-
+            # dummy code end
+            """
 
     # TODO: implement this
     def select_query(self, items):
@@ -549,3 +659,8 @@ while True: # prompt
             break
 
 metadata.close()
+
+
+
+
+

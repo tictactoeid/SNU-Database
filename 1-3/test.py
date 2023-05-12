@@ -1,6 +1,9 @@
 import sys, os
-from lark import Lark, Transformer, UnexpectedToken
+from lark import Lark, Transformer, UnexpectedToken, Tree, Token
 from berkeleydb import db
+
+from ThreeValuedLogic import ThreeValuedLogic
+
 
 DEBUG = False # TODO: make it False
 
@@ -13,6 +16,43 @@ metadata = db.DB()
 metadata.open('./DB/metadata_.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
 # table schema metadata file
 
+def find_data(node: Tree, data_fields: list[str]) -> list[Tree]:
+    """
+    Find all nodes in the parse tree that have one of the specified data fields.
+    """
+    result = []
+    if node.data in data_fields:
+        result.append(node)
+    for child in node.children:
+        if isinstance(child, Tree):
+            result.extend(find_data(child, data_fields))
+    return result
+
+def get_depth_str(node: Tree, target: str, depth: int = 0) -> int:
+    if isinstance(node, Tree):
+        if node.data == target:
+            return depth
+        for child in node.children:
+            result = get_depth(child, target, depth+1)
+            if result is not None:
+                return result
+    elif isinstance(node, str) and node == target:
+        return depth
+    return None
+
+def get_depth(root, target, depth = 0):
+    if isinstance(root, Tree):
+        if root == target:
+            return depth
+        for child in root.children:
+            result = get_depth(child, target, depth+1)
+            if result is not None:
+                return result
+    elif isinstance(root, Token) and root == target: # str
+        #print(root)
+        #print(type(root))
+        return depth
+    return None
 
 class SQLTransformer(Transformer): # lark transformer class
     def create_table_query(self, items): # called when 'CREATE TABLE' query requested well
@@ -336,20 +376,58 @@ class SQLTransformer(Transformer): # lark transformer class
         #for i in iter:
         #    print(i)
         iter2 = items[3].find_data("comparison_predicate")
-        for i in iter2:
+        #for i in iter2:
             #print(i) # comp_operand comp_op comp_operand
             #print(i.children[0].children[0]) # table name 생략 시 이게 None, error 발생
             #print(i.children[0].children[0].children[0].value)  # comp_opernad: table_name
-            print(i.children[0].children[0].data) # table_name
+            #print(i.children[0].children[0].data) # table_name
                             # table name 생략 시 error 발생.
             #print(i.children[0].children[1].children[0].value) # comp_operand: column_name
-            print(i.children[0].children[1].data) # column_name
+            #print(i.children[0].children[1].data) # column_name
             #print(i.children[1].children[0].value) # comp_op
             #print(i.children[2].children[0].children[0].value) # comp_operand
             #print(i.children[2].children[0].children[0])
-            print(i.children[2].children[0].data) # comparable_value
+            #print(i.children[2].children[0].data) # comparable_value
 
-            print(i.children[2].children[0].children[0].type)
+            #print(i.children[2].children[0].children[0].type)
+        iter3 = items[3].find_data("predicate")
+        for i in iter3:
+            depth = get_depth(items[3], i)
+            print(i)
+            print(f"Depth of the node: {depth}")
+
+        print(get_depth(items[3], "and"))
+        print(get_depth(items[3], "or"))
+        print(get_depth(items[3], "not"))
+
+        iteristhispossible = find_data(items[3], ["and_op", "or_op", "not_op", "predicate"])
+            #lambda x: x == "and_op" or x=="or_op" or x=="not_op")
+        for j in iteristhispossible:
+            print(j)
+
+        iternull = items[3].find_data("null_predicate")
+        for i in iternull:
+            print()
+            print(i)
+            print(i.children[0]) # i.children[0].children[0].value table_name
+            print(i.children[1].children[0].value) # column_name
+            print(i.children[2].children[0].value) # is
+            print(i.children[2].children[1]) # [not] or None
+            print(i.children[2].children[2].value) # null
+            print()
+
+        #print(get_depth(items[3], "or_clause"))
+        #print(get_depth(items[3], "and_clause_first"))
+        #print(get_depth(items[3], "and_clause_second"))
+
+        #print(get_depth(items[3], "or"))
+        #print(get_depth(items[3], "and"))
+
+
+
+
+
+
 
     # TODO: implement this
     def select_query(self, items):
@@ -416,7 +494,11 @@ transformer = SQLTransformer()
 #output = sql_parser.parse("insert into table_name (id, name) values(123, \"hello\", \"umm\");")
 #output = sql_parser.parse("insert into ogamdo (name, a_hae, children, id) values ('choi', 13, 2020-01-01, 5678);")
 #output = sql_parser.parse("insert into ref (id, test) values (10, 'hello');")
-output = sql_parser.parse("delete from account where table_name.branch_name = 'Perryridge' and table_name.test > 100;")
+
+output = sql_parser.parse("delete from account where table_name.branch_name = 'Perryridge' and (table_name.test > 100 or OR_CLAUSE is null) and not (100 = parenthesized_not_clause);")
+
+#output = sql_parser.parse("delete from account where or_clause = 100 or and_clause_first > 10 and and_clause_second = 30;")
+
 transformer.transform(output)
 #strFormat = '%-10s%-10s%-10s\n'
 #strOut = strFormat % ('abc','def','cgh')

@@ -55,6 +55,10 @@ INTO : "into"i
 VALUES : "values"i
 DELETE : "delete"i
 
+or_op : OR
+and_op : AND
+not_op : NOT
+
 EXPLAIN : "explain"i
 DESCRIBE : "describe"i
 SET : "set"i
@@ -115,9 +119,12 @@ from_clause : FROM table_reference_list
 table_reference_list : referred_table ("," referred_table)*
 referred_table : table_name [AS table_name]
 where_clause : WHERE boolean_expr
-boolean_expr : boolean_term (OR boolean_term)*
-boolean_term : boolean_factor (AND boolean_factor)*
-boolean_factor : [NOT] boolean_test
+//boolean_expr : boolean_term (OR boolean_term)*
+boolean_expr : boolean_term (or_op boolean_term)*
+//boolean_term : boolean_factor (AND boolean_factor)*
+boolean_term : boolean_factor (and_op boolean_factor)*
+//boolean_factor : [NOT] boolean_test
+boolean_factor : [not_op] boolean_test
 boolean_test : predicate
              | parenthesized_boolean_expr
 parenthesized_boolean_expr : LP boolean_expr RP
