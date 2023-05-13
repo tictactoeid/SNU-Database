@@ -4,40 +4,43 @@ class ThreeValuedLogic:
     UNKNOWN = "unknown"
     NULL = "null"
     inputs = [TRUE, FALSE, UNKNOWN]
-    def ThreeValuedOR(self, operand_1, operand_2):
-        if operand_1 not in self.inputs or operand_2 not in self.inputs:
+    @staticmethod
+    def ThreeValuedOR(operand_1, operand_2):
+        if operand_1 not in ThreeValuedLogic.inputs or operand_2 not in ThreeValuedLogic.inputs:
             raise Exception("Wrong input(s) for Three-Valued Logic")
-        if operand_1 != self.UNKNOWN and operand_2 != self.UNKNOWN:
-            if operand_1 == self.TRUE or operand_2 == self.TRUE:
-                return self.TRUE
+        if operand_1 != ThreeValuedLogic.UNKNOWN and operand_2 != ThreeValuedLogic.UNKNOWN:
+            if operand_1 == ThreeValuedLogic.TRUE or operand_2 == ThreeValuedLogic.TRUE:
+                return ThreeValuedLogic.TRUE
             else:
-                return self.FALSE
-        elif (operand_1 == self.TRUE and operand_2 == self.UNKNOWN) or (operand_1 == self.UNKNOWN and operand_2 == self.TRUE):
-            return self.TRUE
+                return ThreeValuedLogic.FALSE
+        elif (operand_1 == ThreeValuedLogic.TRUE and operand_2 == ThreeValuedLogic.UNKNOWN) or (operand_1 == ThreeValuedLogic.UNKNOWN and operand_2 == ThreeValuedLogic.TRUE):
+            return ThreeValuedLogic.TRUE
         else:
-            return self.UNKNOWN
-    def ThreeValuedAND(self, operand_1, operand_2):
-        if operand_1 not in self.inputs or operand_2 not in self.inputs:
+            return ThreeValuedLogic.UNKNOWN
+    @staticmethod
+    def ThreeValuedAND(operand_1, operand_2):
+        if operand_1 not in ThreeValuedLogic.inputs or operand_2 not in ThreeValuedLogic.inputs:
             raise Exception("Wrong input(s) for Three-Valued Logic")
-        if operand_1 != self.UNKNOWN and operand_2 != self.UNKNOWN:
-            if operand_1 == self.FALSE or operand_2 == self.FALSE:
-                return self.FALSE
+        if operand_1 != ThreeValuedLogic.UNKNOWN and operand_2 != ThreeValuedLogic.UNKNOWN:
+            if operand_1 == ThreeValuedLogic.FALSE or operand_2 == ThreeValuedLogic.FALSE:
+                return ThreeValuedLogic.FALSE
             else:
-                return self.TRUE
-        elif (operand_1 == self.FALSE and operand_2 == self.UNKNOWN) or (operand_1 == self.UNKNOWN and operand_2 == self.FALSE):
-            return self.FALSE
+                return ThreeValuedLogic.TRUE
+        elif (operand_1 == ThreeValuedLogic.FALSE and operand_2 == ThreeValuedLogic.UNKNOWN) or (operand_1 == ThreeValuedLogic.UNKNOWN and operand_2 == ThreeValuedLogic.FALSE):
+            return ThreeValuedLogic.FALSE
         else:
-            return self.UNKNOWN
-    def ThreeValuedNOT(self, operand):
-        if operand not in self.inputs:
+            return ThreeValuedLogic.UNKNOWN
+    @staticmethod
+    def ThreeValuedNOT(operand):
+        if operand not in ThreeValuedLogic.inputs:
             raise Exception("Wrong input(s) for Three-Valued Logic")
 
-        if operand == self.TRUE:
-            return self.FALSE
-        elif operand == self.FALSE:
-            return self.TRUE
+        if operand == ThreeValuedLogic.TRUE:
+            return ThreeValuedLogic.FALSE
+        elif operand == ThreeValuedLogic.FALSE:
+            return ThreeValuedLogic.TRUE
         else:
-            return self.UNKNOWN
+            return ThreeValuedLogic.UNKNOWN
 
 
 

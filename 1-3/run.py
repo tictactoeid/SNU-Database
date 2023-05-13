@@ -293,6 +293,7 @@ class SQLTransformer(Transformer): # lark transformer class
     # TODO: implement this
     # TODO: char length 초과하는 경우 잘라서
     def insert_query(self, items):
+        # TODO: char의 '' 삭제
         table_name = items[2].children[0].lower()
 
         table_schema = metadata.get(table_name.encode())
@@ -380,9 +381,11 @@ class SQLTransformer(Transformer): # lark transformer class
                     return
                 else:
                     value_current = None # save None as null
-            if type_current == "char" and len(value_current) > length_current:
-                print(length_current)
-                values_dict[col] = "\'" + value_current[1:length_current+1] + "\'" # truncate
+            if type_current == "char":
+                    if len(value_current) > length_current:
+                        values_dict[col] = value_current[1:length_current+1] # truncate
+                    else:
+                        values_dict[col] = value_current[1:-1] # remove ''
 
         table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy, inserting value!
 
@@ -423,7 +426,7 @@ class SQLTransformer(Transformer): # lark transformer class
                 key, value = x
                 table_db.delete(key)
                 cnt += 1
-            print("DB_2020-15127> \'" + cnt + "\' row(s) are deleted")
+            print(f"DB_2020-15127> \'{cnt}\' row(s) are deleted")
             return
 
         where_clause = []
@@ -447,6 +450,11 @@ class SQLTransformer(Transformer): # lark transformer class
                         operand_2 = ComparisonOperand(type="comparable_value", value=i.children[2].children[0].children[0].value, comparable_value_type=i.children[2].children[0].children[0].type)
                 else:
                     operand_2 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[2].children[1].children[0].value)
+                if DEBUG:
+                    print(operand_1.value, end=' ')
+                    print(type(operand_1.value))
+                    print(operand_2.value, end=' ')
+                    print(type(operand_2.value))
 
                 if operand_1.type == "column_name":
                     if operand_1.table_name and operand_1.table_name != table_name:
@@ -516,11 +524,6 @@ class SQLTransformer(Transformer): # lark transformer class
             elif i.data == "not_op":
                 where_clause.append(BooleanOperator(type="not", depth=get_depth(items[3], i)))
 
-        if DEBUG:
-            for i in where_clause:
-                print(i, end=" ")
-            print()
-
         max = 0
         cursor = table_db.cursor()
         cnt = 0
@@ -534,20 +537,24 @@ class SQLTransformer(Transformer): # lark transformer class
                     if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME:
                         operand_1_value = tuple_dict[predicate.operand_1.column_name]
                     else:
-                        operand_1_value = tuple_dict[predicate.operand_1.value]
+                        operand_1_value = predicate.operand_1.value
 
                     if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
                         operand_2_value = tuple_dict[predicate.operand_2.column_name]
                     else:
-                        operand_2_value = tuple_dict[predicate.operand_2.value]
+                        operand_2_value = predicate.operand_2.value
 
                     if operand_1_value == ThreeValuedLogic.NULL or operand_2_value == ThreeValuedLogic.NULL:
                         result = ThreeValuedLogic.UNKNOWN
                     else:
                         # TODO: consider datetime comparison
-                        if predicate.operand_1.comparable_value_type == "date":
-                            operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
-                            operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
+                        #if predicate.operand_1.comparable_value_type == "date":
+                        #    operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
+                        #    operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
+                        operator = predicate.operator
+                        if DEBUG:
+                            print(operand_1_value)
+                            print(operand_2_value)
                         if operator == ComparisonPredicate.LESSTHAN:
                             if operand_1_value < operand_2_value:
                                 result = ThreeValuedLogic.TRUE
@@ -578,6 +585,11 @@ class SQLTransformer(Transformer): # lark transformer class
                                 result = ThreeValuedLogic.TRUE
                             else:
                                 result = ThreeValuedLogic.FALSE
+                        else:
+                            if DEBUG:
+                                print("operator: ", end='')
+                                print(operator)
+                                raise("operator err")
 
                 elif isinstance(predicate, NullPredicate):
                     operand_value = tuple_dict[predicate.column_name]
@@ -595,8 +607,22 @@ class SQLTransformer(Transformer): # lark transformer class
                     result = predicate
                 where_clause_result.append(result)
 
+            if DEBUG:
+                print("------parsed where clause------")
+                for i in where_clause:
+                    print(i, end= ' ')
+                print("\n------where clause result------")
+                for i in where_clause_result:
+                    print(i, end=' ')
+                print()
+
             while len(where_clause_result) > 1:
-                max_depth_idx = 0
+                for idx in range(len(where_clause_result)):
+                    operator = where_clause_result[idx]
+                    if isinstance(operator, BooleanOperator):
+                        max_depth_idx = idx # init
+                        break
+
                 for idx in range(len(where_clause_result)):
                     operator = where_clause_result[idx]
                     if not isinstance(operator, BooleanOperator):
@@ -604,6 +630,7 @@ class SQLTransformer(Transformer): # lark transformer class
                     if operator.depth > where_clause_result[max_depth_idx].depth:
                         max_depth_idx = idx
                     # the highest priority를 가진 operator를 찾고, 해당 operator를 연산함
+
                 if where_clause_result[max_depth_idx].type == BooleanOperator.NOT:
                     operand = where_clause_result[max_depth_idx + 1]
                     result = ThreeValuedLogic.ThreeValuedNOT(operand)
@@ -626,11 +653,16 @@ class SQLTransformer(Transformer): # lark transformer class
                     where_clause_result.pop(max_depth_idx + 1)
                     where_clause_result.pop(max_depth_idx - 1)
 
+                if DEBUG:
+                    for i in where_clause_result:
+                        print(i, end=' ')
+                    print()
+
             if where_clause_result[0] == ThreeValuedLogic.TRUE:
                 table_db.delete(key)
                 cnt += 1
-            print("DB_2020-15127> \'" + cnt + "\' row(s) are deleted")
-            return
+        print(f"DB_2020-15127> \'{cnt}\' row(s) are deleted")
+        return
 
     def select_query(self, items):
         table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()

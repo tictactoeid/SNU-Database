@@ -1,3 +1,4 @@
+import time
 class BooleanOperator:
     AND = "and"
     OR = "or"
@@ -25,12 +26,24 @@ class ComparisonOperand:
                 self.table_name = table_name.lower() # may be None
             else:
                 self.table_name = None
+
             self.column_name = column_name.lower()
+            self.value = None
+            self.comparable_value_type = None
+
         elif self.type == self.COMPARABLE_VALUE:
             self.value = value
             self.comparable_value_type = comparable_value_type.lower()  # int, date, null / str -> char
+            self.table_name = None
+            self.column_name = None
             if self.comparable_value_type == "str":
                 self.comparable_value_type = "char"
+                if self.value[0] == "\'" and self.value[-1] == "\'":
+                    self.value = self.value[1:-1]
+            elif self.comparable_value_type == "date":
+                self.value = time.strptime(self.value, "%Y-%m-%d")
+            elif self.comparable_value_type == "int":
+                self.value = int(self.value)
         else:
             raise("ComparisonOperand Type Error")
     def __str__(self):
