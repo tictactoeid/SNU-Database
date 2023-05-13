@@ -4,6 +4,7 @@ import time
 from lark import Lark, Transformer, UnexpectedToken, UnexpectedCharacters, UnexpectedInput, UnexpectedEOF, Tree, Token
 from berkeleydb import db
 
+import ThreeValuedLogic
 from BooleanFactor import *
 from ThreeValuedLogic import *
 
@@ -372,15 +373,16 @@ class SQLTransformer(Transformer): # lark transformer class
                 # column과 value의 type이 불일치
                 print("DB_2020-15127> Insertion has failed: Types are not matched")
                 return
-            if not nullable_current and str(value_current).lower() == "null":
-                # InsertColumnNonNullableError(#colName)
-                print("DB_2020-15127> Insertion has failed: \'" + col + "\' is not nullable")
-                return
+            if value_type_current == "null": #str(value_current).lower() == "null":
+                if not nullable_current:
+                    # InsertColumnNonNullableError(#colName)
+                    print("DB_2020-15127> Insertion has failed: \'" + col + "\' is not nullable")
+                    return
+                else:
+                    value_current = None # save None as null
             if type_current == "char" and len(value_current) > length_current:
                 print(length_current)
                 values_dict[col] = "\'" + value_current[1:length_current+1] + "\'" # truncate
-
-
 
         table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy, inserting value!
 
@@ -524,9 +526,9 @@ class SQLTransformer(Transformer): # lark transformer class
         cnt = 0
         while x := cursor.next():
             key, value = x
-            tuple_dict = eval(value)
+            tuple_dict = eval(value) # current tuple
             where_clause_result = []
-            for idx in range(len(where_clause)):
+            for idx in range(len(where_clause)): # 각 tuple에 대해 각 boolean term 게산. True/False/Unknown
                 predicate = where_clause[idx]
                 if isinstance(predicate, ComparisonPredicate):
                     if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME:
@@ -578,14 +580,57 @@ class SQLTransformer(Transformer): # lark transformer class
                                 result = ThreeValuedLogic.FALSE
 
                 elif isinstance(predicate, NullPredicate):
-                    pass # TODO
+                    operand_value = tuple_dict[predicate.column_name]
+                    if predicate.is_not_null:
+                        if operand_value != None: # TODO: null이 어떻게 저장되지?
+                            return ThreeValuedLogic.TRUE
+                        else:
+                            return ThreeValuedLogic.FALSE
+                    else:
+                        if operand_value == None:
+                            return ThreeValuedLogic.TRUE
+                        else:
+                            return ThreeValuedLogic.FALSE
                 else:
                     result = predicate
-                where_clause.append(result)
+                where_clause_result.append(result)
 
-            table_db.delete(key)
-            cnt += 1
+            while len(where_clause_result) > 1:
+                max_depth_idx = 0
+                for idx in range(len(where_clause_result)):
+                    operator = where_clause_result[idx]
+                    if not isinstance(operator, BooleanOperator):
+                        continue
+                    if operator.depth > where_clause_result[max_depth_idx].depth:
+                        max_depth_idx = idx
+                    # the highest priority를 가진 operator를 찾고, 해당 operator를 연산함
+                if where_clause_result[max_depth_idx].type == BooleanOperator.NOT:
+                    operand = where_clause_result[max_depth_idx + 1]
+                    result = ThreeValuedLogic.ThreeValuedNOT(operand)
+                    where_clause_result[max_depth_idx] = result
+                    where_clause_result.pop(max_depth_idx+1)
 
+                elif where_clause_result[max_depth_idx].type == BooleanOperator.AND:
+                    operand_1 = where_clause_result[max_depth_idx - 1]
+                    operand_2 = where_clause_result[max_depth_idx + 1]
+                    result = ThreeValuedLogic.ThreeValuedAND(operand_1, operand_2)
+                    where_clause_result[max_depth_idx] = result
+                    where_clause_result.pop(max_depth_idx + 1)
+                    where_clause_result.pop(max_depth_idx - 1)
+
+                elif where_clause_result[max_depth_idx].type == BooleanOperator.OR:
+                    operand_1 = where_clause_result[max_depth_idx - 1]
+                    operand_2 = where_clause_result[max_depth_idx + 1]
+                    result = ThreeValuedLogic.ThreeValuedOR(operand_1, operand_2)
+                    where_clause_result[max_depth_idx] = result
+                    where_clause_result.pop(max_depth_idx + 1)
+                    where_clause_result.pop(max_depth_idx - 1)
+
+            if where_clause_result[0] == ThreeValuedLogic.TRUE:
+                table_db.delete(key)
+                cnt += 1
+            print("DB_2020-15127> \'" + cnt + "\' row(s) are deleted")
+            return
 
     def select_query(self, items):
         table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()

@@ -1,5 +1,8 @@
 class BooleanOperator:
-    OPERATOR_TYPES = ["and", "or", "not"]
+    AND = "and"
+    OR = "or"
+    NOT = "not"
+    OPERATOR_TYPES = [AND, OR, NOT]
     def __init__(self, type, depth):
         self.type = type.lower()
         self.depth = depth
