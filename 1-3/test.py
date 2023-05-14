@@ -436,48 +436,19 @@ class SQLTransformer(Transformer): # lark transformer class
 
     # TODO: implement this
     def select_query(self, items):
-        table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()
-        table_schema = metadata.get(table_name.encode())
-        if table_schema is None:
-            # NoSuchTable
-            print("DB_2020-15127> No such table")
-            return
-        table_schema = eval(table_schema.decode())
-        table_db = db.DB()
-        table_db.open('./DB/' + table_name + '.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
-        column_list = []
-        for col_dict in table_schema["columns"]:
-            column_list.append(col_dict["column_name"])
+        #table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()
+        if items[1].children == []: # select *
+            pass
 
-        column_count = len(column_list)
-        for i in range(column_count):
-            print("+", end='')
-            print('-' * 15, end='')
-        print('+')
-        strFormat = '| %-13s '
-        for col in column_list:
-            print(strFormat % col, end='')
-        print('|')
-        for i in range(column_count):
-            print("+", end='')
-            print('-' * 15, end='')
-        print('+')
-
-        cursor = table_db.cursor()
-        while x := cursor.next():
-            key, value = x
-            tuple_dict = eval(value.decode())
-            for col in column_list:
-                print(strFormat % tuple_dict[col], end='')
-            print('|')
-
-        for i in range(column_count):
-            print("+", end='')
-            print('-' * 15, end='')
-        print('+')
-
-        table_db.close()
-
+        print(items[2].pretty())
+        #print(items[2].pretty())
+        #for i in items[2].find_data("referred_table"):
+            #print(i.children[0].children[0].value) # table_name
+       # for i in items[1].find_data("selected_column"):
+        #    if i.children[0] is not None:
+        #        print(i.children[0].children[0].value) # table_name
+       #     print(i.children[1].children[0].value) # column_name
+       #     print()
     def show_tables_query(self, items):
         print("------------------------")
         cursor = metadata.cursor()
@@ -500,9 +471,13 @@ transformer = SQLTransformer()
 #output = sql_parser.parse("insert into ogamdo (name, a_hae, children, id) values ('choi', 13, 2020-01-01, 5678);")
 #output = sql_parser.parse("insert into ref (id, test) values (10, 'hello');")
 
-output = sql_parser.parse("delete from account where table_name.branch_name = 'Perryridge' and (table_name.test > 100 or OR_CLAUSE is null) and not (100 = parenthesized_not_clause);")
+#output = sql_parser.parse("delete from account where table_name.branch_name = 'Perryridge' and (table_name.test > 100 or OR_CLAUSE is null) and not (100 = parenthesized_not_clause);")
 
 #output = sql_parser.parse("delete from account where or_clause = 100 or and_clause_first > 10 and and_clause_second = 30;")
+
+output = sql_parser.parse("select customer_name, borrower.loan_number, amount from borrower, loan, table_name where table_name.test > 100 or OR_CLAUSE is null;")
+
+#output = sql_parser.parse("select * from customer;")
 
 transformer.transform(output)
 #strFormat = '%-10s%-10s%-10s\n'

@@ -438,6 +438,7 @@ class SQLTransformer(Transformer): # lark transformer class
             print(f"DB_2020-15127> \'{cnt}\' row(s) are deleted")
             return
 
+        # where clause 정보를 저장
         where_clause = []
         where_iter = find_data_multiple(items[3], ["and_op", "or_op", "not_op", "comparison_predicate", "null_predicate"])
         for i in where_iter:
@@ -519,10 +520,10 @@ class SQLTransformer(Transformer): # lark transformer class
                     print("DB_2020-15127> Where clause trying to reference non existing column")
                     return
 
-                if i.children[2].children[1]: # is NOT null
-                    is_not_null = True
-                else: # is null
-                    is_not_null = False
+                if i.children[2].children[1]:
+                    is_not_null = True # is NOT null
+                else:
+                    is_not_null = False # is null
 
                 where_clause.append(NullPredicate(column_name=column_name_current, table_name=table_name_current, is_not_null=is_not_null))
 
@@ -532,8 +533,11 @@ class SQLTransformer(Transformer): # lark transformer class
                 where_clause.append(BooleanOperator(type="or", depth=get_depth(items[3], i)))
             elif i.data == "not_op":
                 where_clause.append(BooleanOperator(type="not", depth=get_depth(items[3], i)))
+            # lark tree에서 depth가 깊은 operator의 우선순위가 더 높다.
+        # where clause 저장 끝
 
-        max = 0
+        #max = 0
+        # 각 tuple에 대해 where clause result를 계산
         cursor = table_db.cursor()
         cnt = 0
         while x := cursor.next():
@@ -681,36 +685,277 @@ class SQLTransformer(Transformer): # lark transformer class
             if where_clause_result[0] == ThreeValuedLogic.TRUE:
                 table_db.delete(key)
                 cnt += 1
+            # where clause 연산 끝
         print(f"DB_2020-15127> \'{cnt}\' row(s) are deleted")
         return
 
     def select_query(self, items):
-        #TODO: 출력 시 null(None), date(time struct) handle
-        table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()
-        table_schema = metadata.get(table_name.encode())
-        if table_schema is None:
-            # NoSuchTable
-            print("DB_2020-15127> No such table")
-            return
-        table_schema = eval(table_schema.decode())
-        table_db = db.DB()
-        table_db.open('./DB/' + table_name + '.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
+        table_list = [] # maximum three tables
+        table_schema_list = []
+        table_db_list = []
         column_list = []
-        for col_dict in table_schema["columns"]:
-            column_list.append(col_dict["column_name"])
+        for i in items[2].find_data("referred_table"):
+            table_name = i.children[0].children[0].value
+            table_list.append(table_name)
+            table_schema = metadata.get(table_name.encode())
+            if table_schema is None:
+                # SelectTableExistenceError(#tableName)
+                print("DB_2020-15127> Selection has failed: \'"+table_name+"\' does not exist")
+                return
+            table_schema = eval(table_schema.decode())
+            table_schema_list.append(table_schema)
+            table_db = db.DB()
+            table_db.open('./DB/' + table_name + '.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
+            table_db_list.append(table_db)
+            current_column_list = []
+            for col_dict in table_schema["columns"]:
+                current_column_list.append(col_dict["column_name"])
+            column_list.append(current_column_list)
 
-        column_count = len(column_list)
+        selected_column_list = []
+        if items[1].children == []:
+            # select *
+            for table_schema in table_schema_list:
+                for col_dict in table_schema["columns"]:
+                    table_name = table_schema["table_name"]
+                    column_name = col_dict["column_name"]
+                    selected_col_dict = {"table_name": table_name, "column_name": column_name,
+                                         "table_name_called": False}
+                    selected_column_list.append(selected_col_dict)
+            for col_1 in selected_column_list:
+                for col_2 in selected_column_list:
+                    if col_1["table_name"] != col_2["table_name"] and col_1["column_name"] == col_2["column_name"]:
+                        col_1["table_name_called"] = True
+                        col_2["table_name_called"] = True
+        else:
+            for i in items[1].find_data("selected_column"):
+                if i.children[0] is not None:
+                    table_name = i.children[0].children[0].value
+                    table_name_called = True
+                else:
+                    table_name = None
+                    table_name_called = False
+                    for table_schema in table_schema_list:
+                        for col_dict in table_schema["columns"]:
+                            if column_name == col_dict["column_name"]:
+                                if table_name is None:
+                                    table_name = table_schema["table_name"]
+                                else:
+                                    # SelectColumnResolveError(#colName)
+                                    # 모호한 경우 - column 이름이 중복되었으나 table name이 명시되지 않은 경우
+                                    print("DB_2020-15127> Selection has failed: fail to resolve \'" + column_name + "\'")
+                                    return
+                    if table_name is None:
+                        # SelectColumnResolveError(#colName)
+                        # 존재하지 않는 column
+                        print("DB_2020-15127> Selection has failed: fail to resolve \'" + column_name + "\'")
+                        return
+                column_name = i.children[1].children[0].value
+                selected_col_dict = {"table_name": table_name, "column_name": column_name,
+                                     "table_name_called": table_name_called}
+                selected_column_list.append(selected_col_dict)
+                # table_name_called : query가 table_name.column_name의 형태인지 column_name의 형태인지 저장. 출력 시 필요
+
+        # TODO: where clause 수정 start
+        where_clause = []
+        where_iter = find_data_multiple(items[2], ["and_op", "or_op", "not_op", "comparison_predicate", "null_predicate"])
+        for i in where_iter:
+            if i.data == "comparison_predicate":  # comp_operand comp_op comp_operand
+                operator = i.children[1].children[0].value
+                if i.children[0].children[0]:
+                    if i.children[0].children[0].data == "table_name":
+                        operand_1 = ComparisonOperand(type="column_name", table_name=i.children[0].children[0].children[0].value, column_name=i.children[0].children[1].children[0].value)
+                    elif i.children[0].children[0].data == "comparable_value":
+                        operand_1 = ComparisonOperand(type="comparable_value", value=i.children[0].children[0].children[0].value, comparable_value_type=i.children[0].children[0].children[0].type)
+                else: # i.children[0].children[0] is None
+                    # table_name has omitted
+                    operand_1 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[0].children[1].children[0].value)
+
+                if i.children[2].children[0]:
+                    if i.children[2].children[0].data == "table_name":
+                        operand_2 = ComparisonOperand(type="column_name", table_name=i.children[2].children[0].children[0].value, column_name=i.children[2].children[1].children[0].value)
+                    elif i.children[2].children[0].data == "comparable_value":
+                        operand_2 = ComparisonOperand(type="comparable_value", value=i.children[2].children[0].children[0].value, comparable_value_type=i.children[2].children[0].children[0].type)
+                else:
+                    operand_2 = ComparisonOperand(type="column_name", table_name=None, column_name=i.children[2].children[1].children[0].value)
+                if DEBUG:
+                    print(operand_1.value, end=' ')
+                    print(type(operand_1.value))
+                    print(operand_2.value, end=' ')
+                    print(type(operand_2.value))
+
+                if operand_1.type == "column_name" and operand_1.table_name is None:
+                    table_name = None
+                    for table_schema in table_schema_list:
+                        for col_dict in table_schema["columns"]:
+                            if operand_1.column_name == col_dict["column_name"]:
+                                if table_name is None:
+                                    table_name = table_schema["table_name"]
+                                    operand_1.set_comparable_value_type(col_dict["type"])
+                                else:
+                                    # WhereAmbiguousReference
+                                    # 모호한 경우 - column 이름이 중복되었으나 table name이 명시되지 않은 경우
+                                    print("DB_2020-15127> Where clause contains ambiguous reference")
+                                    return
+                    if table_name is None:
+                        # WhereColumnNotExist
+                        print("DB_2020-15127> Where clause trying to reference non existing column")
+                        return
+                    operand_1.table_name = table_name
+
+                    if operand_1.table_name not in table_list:
+                        # WhereTableNotSpecified
+                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                        return
+
+                if operand_2.type == "column_name" and operand_2.table_name is None:
+                    table_name = None
+                    for table_schema in table_schema_list:
+                        for col_dict in table_schema["columns"]:
+                            if operand_2.column_name == col_dict["column_name"]:
+                                if table_name is None:
+                                    table_name = table_schema["table_name"]
+                                    operand_2.set_comparable_value_type(col_dict["type"])
+                                else:
+                                    # WhereAmbiguousReference
+                                    # 모호한 경우 - column 이름이 중복되었으나 table name이 명시되지 않은 경우
+                                    print("DB_2020-15127> Where clause contains ambiguous reference")
+                                    return
+                    if table_name is None:
+                        # WhereColumnNotExist
+                        print("DB_2020-15127> Where clause trying to reference non existing column")
+                        return
+                    operand_2.table_name = table_name
+
+                    if operand_2.table_name not in table_list:
+                        # WhereTableNotSpecified
+                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                        return
+
+                if operand_1.comparable_value_type == "null" or operand_2.comparable_value_type == "null":
+                    pass
+                elif operand_1.comparable_value_type != operand_2.comparable_value_type:
+                    # WhereIncomparableError
+                    print("DB_2020-15127> Where clause trying to compare incomparable values")
+                    return
+                where_clause.append(ComparisonPredicate(operand_1=operand_1, operator=operator, operand_2=operand_2))
+
+            elif i.data == "null_predicate":
+                # [table_name "."] column_name null_operation
+                # column_name, table_name = None, is_not_null = False
+                column_name_current = i.children[1].children[0].value
+                if i.children[0]:
+                    table_name_current = i.children[0].children[0].value.lower()
+                    if table_name_current not in table_list:
+                        # WhereTableNotSpecified
+                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                        return
+                else: # [table_name] has omitted
+                    table_name_current = None
+                    for table_schema in table_schema_list:
+                        for col_dict in table_schema["columns"]:
+                            if column_name_current == col_dict["column_name"]:
+                                if table_name_current is None:
+                                    table_name_current = table_schema["table_name"]
+                                else:
+                                    # WhereAmbiguousReference
+                                    print("DB_2020-15127> Where clause contains ambiguous reference")
+                                    return
+                    if table_name_current is None:
+                        # WhereColumnNotExist
+                        print("DB_2020-15127> Where clause trying to reference non existing column")
+                        return
+
+                if i.children[2].children[1]: # is NOT null
+                    is_not_null = True
+                else: # is null
+                    is_not_null = False
+
+                where_clause.append(NullPredicate(column_name=column_name_current, table_name=table_name_current, is_not_null=is_not_null))
+
+            elif i.data == "and_op":
+                where_clause.append(BooleanOperator(type="and", depth=get_depth(items[2], i)))
+            elif i.data == "or_op":
+                where_clause.append(BooleanOperator(type="or", depth=get_depth(items[2], i)))
+            elif i.data == "not_op":
+                where_clause.append(BooleanOperator(type="not", depth=get_depth(items[2], i)))
+
+            # TODO: where clause end
+
+        column_count = len(selected_column_list)
         for i in range(column_count):
             print("+", end='')
-            print('-' * 15, end='')
+            print('-' * 20, end='')
         print('+')
-        strFormat = '| %-13s '
-        for col in column_list:
-            print(strFormat % col, end='')
+        strFormat = '| %-18s '
+        for selected_col_dict in selected_column_list:
+            if selected_col_dict["table_name_called"]:
+                col_print = selected_col_dict["table_name"] + "." + selected_col_dict["column_name"]
+            else:
+                col_print = selected_col_dict["column_name"]
+            print(strFormat % col_print.upper(), end='')
         print('|')
         for i in range(column_count):
             print("+", end='')
-            print('-' * 15, end='')
+            print('-' * 20, end='')
+        print('+')
+
+        table_count = len(table_list)
+        if table_count == 3:
+            cursor_0 = table_db_list[0].cursor()
+            while x := cursor_0.next():
+                cursor_1 = table_db_list[1].cursor()
+                while y := cursor_1.next():
+                    cursor_2 = table_db_list[2].cursor()
+                    while z := cursor_2.next():
+                        # TODO: where clause result
+
+        elif table_count == 2:
+            pass
+        elif table_count == 1:
+            pass
+
+
+
+
+        cursor = table_db.cursor()
+        while x := cursor.next():
+            key, value = x
+            tuple_dict = eval(value.decode())
+            for col in column_list:
+                print_value = tuple_dict[col]
+                if tuple_dict[col] is None:
+                    print_value = 'null'
+                elif isinstance(tuple_dict[col], time.struct_time):
+                    print_value = time.strftime('%Y-%m-%d', tuple_dict[col])
+                print(strFormat % print_value, end='')
+            print('|')
+
+        for i in range(column_count):
+            print("+", end='')
+            print('-' * 20, end='')
+        print('+')
+
+        table_db.close()
+
+
+
+
+
+        # dummy for select *
+        """
+        column_count = len(column_list)
+        for i in range(column_count):
+            print("+", end='')
+            print('-' * 20, end='')
+        print('+')
+        strFormat = '| %-18s '
+        for col in column_list:
+            print(strFormat % col.upper(), end='')
+        print('|')
+        for i in range(column_count):
+            print("+", end='')
+            print('-' * 20, end='')
         print('+')
 
         cursor = table_db.cursor()
@@ -718,15 +963,21 @@ class SQLTransformer(Transformer): # lark transformer class
             key, value = x
             tuple_dict = eval(value.decode())
             for col in column_list:
-                print(strFormat % tuple_dict[col], end='')
+                print_value = tuple_dict[col]
+                if tuple_dict[col] is None:
+                    print_value = 'null'
+                elif isinstance(tuple_dict[col], time.struct_time):
+                    print_value = time.strftime('%Y-%m-%d', tuple_dict[col])
+                print(strFormat % print_value, end='')
             print('|')
 
         for i in range(column_count):
             print("+", end='')
-            print('-' * 15, end='')
+            print('-' * 20, end='')
         print('+')
 
         table_db.close()
+        """
 
     def show_tables_query(self, items):
         print("------------------------")
