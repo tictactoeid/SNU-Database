@@ -42,6 +42,7 @@ def get_depth(root, target, depth = 0):
     return None
 
 class SQLTransformer(Transformer): # lark transformer class
+    # TODO: null의 insert, delete, where clause
     def create_table_query(self, items): # called when 'CREATE TABLE' query requested well
         # CREATE TABLE table_name table_element_list
 
@@ -291,11 +292,8 @@ class SQLTransformer(Transformer): # lark transformer class
         self.explain_query(items)
 
     # TODO: implement this
-    # TODO: char length 초과하는 경우 잘라서
     def insert_query(self, items):
-        # TODO: char의 '' 삭제
         table_name = items[2].children[0].lower()
-
         table_schema = metadata.get(table_name.encode())
         if table_schema is None:
             # NoSuchTable
@@ -380,12 +378,23 @@ class SQLTransformer(Transformer): # lark transformer class
                     print("DB_2020-15127> Insertion has failed: \'" + col + "\' is not nullable")
                     return
                 else:
-                    value_current = None # save None as null
-            if type_current == "char":
+                    values_dict[col] = None # save None as null
+                    # TODO: select에서 null check
+            elif type_current == "char":
                     if len(value_current) > length_current:
                         values_dict[col] = value_current[1:length_current+1] # truncate
                     else:
                         values_dict[col] = value_current[1:-1] # remove ''
+            elif type_current == "int":
+                values_dict[col] = int(values_dict[col])
+            #else: # type_current == "date"
+            #    values_dict[col] = time.strptime(values_dict[col], "%Y-%m-%d")
+
+            # date형을 time_struct로 저장하면 추후 db에 저장된 tuple을 읽어 eval()할 때 error가 발생
+            # 어차피 각 column의 type을 따로 저장하고 있으므로, 실제 table에는 모두 string형으로 저장하도록 함
+            # 다만, where clause에서 이를 주의해야 함.
+            if DEBUG:
+                print(type(values_dict[col]))
 
         table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy, inserting value!
 
@@ -457,7 +466,7 @@ class SQLTransformer(Transformer): # lark transformer class
                     print(type(operand_2.value))
 
                 if operand_1.type == "column_name":
-                    if operand_1.table_name and operand_1.table_name != table_name:
+                    if operand_1.table_name is not None and operand_1.table_name != table_name:
                         # WhereTableNotSpecified
                         print("DB_2020-15127> Where clause trying to reference tables which are not specified")
                         return
@@ -467,11 +476,11 @@ class SQLTransformer(Transformer): # lark transformer class
                         return
                     for col_dict in columns:
                         if col_dict["column_name"] == operand_1.column_name:
-                            operand_1.comparable_value_type = col_dict["type"]
+                            operand_1.set_comparable_value_type(col_dict["type"])
                             break
 
                 if operand_2.type == "column_name":
-                    if operand_2.table_name and operand_2.table_name != table_name:
+                    if operand_2.table_name is not None and operand_2.table_name != table_name:
                         # WhereTableNotSpecified
                         print("DB_2020-15127> Where clause trying to reference tables which are not specified")
                         return
@@ -481,7 +490,7 @@ class SQLTransformer(Transformer): # lark transformer class
                         return
                     for col_dict in columns:
                         if col_dict["column_name"] == operand_2.column_name:
-                            operand_2.comparable_value_type = col_dict["type"]
+                            operand_2.set_comparable_value_type(col_dict["type"])
                             break
 
                 if operand_1.comparable_value_type == "null" or operand_2.comparable_value_type == "null":
@@ -529,6 +538,8 @@ class SQLTransformer(Transformer): # lark transformer class
         cnt = 0
         while x := cursor.next():
             key, value = x
+            if DEBUG:
+                print(value)
             tuple_dict = eval(value) # current tuple
             where_clause_result = []
             for idx in range(len(where_clause)): # 각 tuple에 대해 각 boolean term 게산. True/False/Unknown
@@ -538,23 +549,31 @@ class SQLTransformer(Transformer): # lark transformer class
                         operand_1_value = tuple_dict[predicate.operand_1.column_name]
                     else:
                         operand_1_value = predicate.operand_1.value
-
                     if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
                         operand_2_value = tuple_dict[predicate.operand_2.column_name]
                     else:
                         operand_2_value = predicate.operand_2.value
 
-                    if operand_1_value == ThreeValuedLogic.NULL or operand_2_value == ThreeValuedLogic.NULL:
+                    if operand_1_value is None or operand_2_value is None:
+                        # null exception
+                        # 이후 null 고려할 필요 없음
                         result = ThreeValuedLogic.UNKNOWN
+                    elif operand_1_value == ThreeValuedLogic.NULL or operand_2_value == ThreeValuedLogic.NULL:
+                        result = ThreeValuedLogic.UNKNOWN # TODO: 이거 지워도 되나
                     else:
-                        # TODO: consider datetime comparison
+                        # TODO: consider datetime comparison: predicate의 value는 time_struct로, DB file에는 str로 저장됨
                         #if predicate.operand_1.comparable_value_type == "date":
                         #    operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
                         #    operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
+                        if predicate.operand_1.comparable_value_type == "date" or predicate.operand_2.comparable_value_type == "date":
+                            # TODO
+
+                            if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME: # "date" type value - saved as str
+                                operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
+                            if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
+                                operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
                         operator = predicate.operator
-                        if DEBUG:
-                            print(operand_1_value)
-                            print(operand_2_value)
+
                         if operator == ComparisonPredicate.LESSTHAN:
                             if operand_1_value < operand_2_value:
                                 result = ThreeValuedLogic.TRUE
@@ -593,16 +612,17 @@ class SQLTransformer(Transformer): # lark transformer class
 
                 elif isinstance(predicate, NullPredicate):
                     operand_value = tuple_dict[predicate.column_name]
+                    print(operand_value)
                     if predicate.is_not_null:
-                        if operand_value != None: # TODO: null이 어떻게 저장되지?
-                            return ThreeValuedLogic.TRUE
+                        if operand_value is not None: # TODO: null이 어떻게 저장되지?
+                            result = ThreeValuedLogic.TRUE
                         else:
-                            return ThreeValuedLogic.FALSE
+                            result = ThreeValuedLogic.FALSE
                     else:
-                        if operand_value == None:
-                            return ThreeValuedLogic.TRUE
+                        if operand_value is None:
+                            result = ThreeValuedLogic.TRUE
                         else:
-                            return ThreeValuedLogic.FALSE
+                            result = ThreeValuedLogic.FALSE
                 else:
                     result = predicate
                 where_clause_result.append(result)
@@ -665,6 +685,7 @@ class SQLTransformer(Transformer): # lark transformer class
         return
 
     def select_query(self, items):
+        #TODO: 출력 시 null(None), date(time struct) handle
         table_name = items[2].children[0].children[1].children[0].children[0].children[0].lower()
         table_schema = metadata.get(table_name.encode())
         if table_schema is None:

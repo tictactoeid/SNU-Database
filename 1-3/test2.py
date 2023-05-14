@@ -1,4 +1,1 @@
-print("a" < "b")
-
-print("\'a\'" < "\'hello\'")
-print("a" < "\'hello\'")
+print(0==None)

@@ -38,12 +38,15 @@ class ComparisonOperand:
             self.column_name = None
             if self.comparable_value_type == "str":
                 self.comparable_value_type = "char"
-                if self.value[0] == "\'" and self.value[-1] == "\'":
-                    self.value = self.value[1:-1]
+                if self.value:
+                    if self.value[0] == "\'" and self.value[-1] == "\'":
+                        self.value = self.value[1:-1]
             elif self.comparable_value_type == "date":
-                self.value = time.strptime(self.value, "%Y-%m-%d")
+                if self.value:
+                    self.value = time.strptime(self.value, "%Y-%m-%d")
             elif self.comparable_value_type == "int":
-                self.value = int(self.value)
+                if self.value:
+                    self.value = int(self.value)
         else:
             raise("ComparisonOperand Type Error")
     def __str__(self):
@@ -54,6 +57,25 @@ class ComparisonOperand:
                 return self.column_name
         else:
             return str(self.value)
+    def set_comparable_value_type(self, type):
+        self.comparable_value_type = type
+
+        if self.comparable_value_type == "str":
+            self.comparable_value_type = "char"
+            if self.value:
+                if self.value[0] == "\'" and self.value[-1] == "\'":
+                    self.value = self.value[1:-1]
+        elif self.comparable_value_type == "date":
+            if self.value:
+                self.value = time.strptime(self.value, "%Y-%m-%d")
+        elif self.comparable_value_type == "int":
+            if self.value:
+                self.value = int(self.value)
+        elif self.comparable_value_type == "char":
+            pass
+        else:
+            raise ("ComparisonOperand Type Error")
+
 
 class ComparisonPredicate:
     # operators
@@ -75,6 +97,8 @@ class NullPredicate:
     def __init__(self, column_name, table_name=None, is_not_null=False):
         if table_name:
             self.table_name = table_name.lower()  # may be None
+        else:
+            self.table_name = None
         self.column_name = column_name.lower()
         self.is_not_null = is_not_null # IS [NOT] NULL : NOT 있으면 True, 없으면 False
 
