@@ -42,6 +42,8 @@ def get_depth(root, target, depth = 0):
     return None
 
 def operate_comparison_predicate(predicate, operand_1_value, operand_2_value):
+    # 객체로 저장이 완료된 comparison predicate를
+    # TRUE, FALSE, UNKNOWN 중 어느 것인지 계산
     if operand_1_value is None or operand_2_value is None:
         # null exception
         # 이후 null 고려할 필요 없음
@@ -523,7 +525,6 @@ class SQLTransformer(Transformer): # lark transformer class
             values_type_dict[col] = values_type[column_order_query.index(col)]
         # {"id" : 10, "name" : "jimin"}
 
-
         for col in values_dict:
             value_current = values_dict[col]
             value_type_current = values_type_dict[col]
@@ -859,6 +860,16 @@ class SQLTransformer(Transformer): # lark transformer class
                         print("DB_2020-15127> Where clause trying to reference non existing column")
                         return
                     operand_1.table_name = table_name
+                elif operand_1.type == "column_name":
+                    idx = 0
+                    for i in range(len(table_list)):
+                        if table_list[i] == operand_1.table_name:
+                         idx = i
+                         break
+                    for col_dict in table_schema_list[i]["columns"]:
+                        if operand_1.column_name == col_dict["column_name"]:
+                            operand_1.set_comparable_value_type(col_dict["type"])
+                            break
 
                 if operand_1.table_name is not None and operand_1.table_name not in table_list:
                     # WhereTableNotSpecified
@@ -884,6 +895,17 @@ class SQLTransformer(Transformer): # lark transformer class
                         return
                     operand_2.table_name = table_name
 
+                elif operand_2.type == "column_name":
+                    idx = 0
+                    for i in range(len(table_list)):
+                        if table_list[i] == operand_2.table_name:
+                         idx = i
+                         break
+                    for col_dict in table_schema_list[i]["columns"]:
+                        if operand_2.column_name == col_dict["column_name"]:
+                            operand_2.set_comparable_value_type(col_dict["type"])
+                            break
+
                 if operand_2.table_name is not None and operand_2.table_name not in table_list:
                     # WhereTableNotSpecified
                     print("DB_2020-15127> Where clause trying to reference tables which are not specified")
@@ -893,6 +915,8 @@ class SQLTransformer(Transformer): # lark transformer class
                     pass
                 elif operand_1.comparable_value_type != operand_2.comparable_value_type:
                     # WhereIncomparableError
+                    #print(operand_1.comparable_value_type)
+                    #print(operand_2.comparable_value_type)
                     print("DB_2020-15127> Where clause trying to compare incomparable values")
                     return
                 where_clause.append(ComparisonPredicate(operand_1=operand_1, operator=operator, operand_2=operand_2))
@@ -1122,44 +1146,6 @@ class SQLTransformer(Transformer): # lark transformer class
 
         for table_db in table_db_list:
             table_db.close()
-
-
-        # dummy for select *
-        """
-        column_count = len(column_list)
-        for i in range(column_count):
-            print("+", end='')
-            print('-' * 20, end='')
-        print('+')
-        strFormat = '| %-18s '
-        for col in column_list:
-            print(strFormat % col.upper(), end='')
-        print('|')
-        for i in range(column_count):
-            print("+", end='')
-            print('-' * 20, end='')
-        print('+')
-
-        cursor = table_db.cursor()
-        while x := cursor.next():
-            key, value = x
-            tuple_dict = eval(value.decode())
-            for col in column_list:
-                print_value = tuple_dict[col]
-                if tuple_dict[col] is None:
-                    print_value = 'null'
-                elif isinstance(tuple_dict[col], time.struct_time):
-                    print_value = time.strftime('%Y-%m-%d', tuple_dict[col])
-                print(strFormat % print_value, end='')
-            print('|')
-
-        for i in range(column_count):
-            print("+", end='')
-            print('-' * 20, end='')
-        print('+')
-
-        table_db.close()
-        """
 
     def show_tables_query(self, items):
         print("------------------------")
