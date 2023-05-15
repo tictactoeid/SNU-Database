@@ -8,7 +8,7 @@ import ThreeValuedLogic
 from BooleanFactor import *
 from ThreeValuedLogic import *
 
-DEBUG = True # TODO: make it False
+DEBUG = False # TODO: make it False
 
 with open("grammar.lark") as grammar:
     sql_parser = Lark(grammar.read(), start="command", lexer="basic")
@@ -40,6 +40,175 @@ def get_depth(root, target, depth = 0):
     elif isinstance(root, Token) and root == target:
         return depth
     return None
+
+def operate_comparison_predicate(predicate, operand_1_value, operand_2_value):
+    if operand_1_value is None or operand_2_value is None:
+        # null exception
+        # 이후 null 고려할 필요 없음
+        result = ThreeValuedLogic.UNKNOWN
+    elif operand_1_value == ThreeValuedLogic.NULL or operand_2_value == ThreeValuedLogic.NULL:
+        result = ThreeValuedLogic.UNKNOWN  # TODO: 이거 지워도 되나
+    else:
+        # TODO: consider datetime comparison: predicate의 value는 time_struct로, DB file에는 str로 저장됨
+        # if predicate.operand_1.comparable_value_type == "date":
+        #    operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
+        #    operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
+        if predicate.operand_1.comparable_value_type == "date" or predicate.operand_2.comparable_value_type == "date":
+            # TODO
+
+            if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME:  # "date" type value - saved as str
+                operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
+            if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
+                operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
+        operator = predicate.operator
+
+        if operator == ComparisonPredicate.LESSTHAN:
+            if operand_1_value < operand_2_value:
+                result = ThreeValuedLogic.TRUE
+            else:
+                result = ThreeValuedLogic.FALSE
+        elif operator == ComparisonPredicate.LESSEQUAL:
+            if operand_1_value <= operand_2_value:
+                result = ThreeValuedLogic.TRUE
+            else:
+                result = ThreeValuedLogic.FALSE
+        elif operator == ComparisonPredicate.GREATERTHAN:
+            if operand_1_value > operand_2_value:
+                result = ThreeValuedLogic.TRUE
+            else:
+                result = ThreeValuedLogic.FALSE
+        elif operator == ComparisonPredicate.GREATEREQUAL:
+            if operand_1_value >= operand_2_value:
+                result = ThreeValuedLogic.TRUE
+            else:
+                result = ThreeValuedLogic.FALSE
+        elif operator == ComparisonPredicate.EQUAL:
+            if operand_1_value == operand_2_value:
+                result = ThreeValuedLogic.TRUE
+            else:
+                result = ThreeValuedLogic.FALSE
+        elif operator == ComparisonPredicate.NOTEQUAL:
+            if operand_1_value != operand_2_value:
+                result = ThreeValuedLogic.TRUE
+            else:
+                result = ThreeValuedLogic.FALSE
+        else:
+            if DEBUG:
+                print("operator: ", end='')
+                print(operator)
+                raise ("operator err")
+    return result
+
+def operate_null_predicate(predicate, operand_value):
+    if predicate.is_not_null:
+        if operand_value is not None:  # TODO: null이 어떻게 저장되지?
+            result = ThreeValuedLogic.TRUE
+        else:
+            result = ThreeValuedLogic.FALSE
+    else:
+        if operand_value is None:
+            result = ThreeValuedLogic.TRUE
+        else:
+            result = ThreeValuedLogic.FALSE
+    return result
+
+def get_operand_value_comparison_predicate(predicate, tables, tuples, table_cnt):
+    # tables: table 이름 list
+    # tuples: 각 table의 current tuple
+    # table은 1~3개
+
+    if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME:
+        if table_cnt == 1: # opnd.table_name may be None
+            operand_1_value = tuples[0][predicate.operand_1.column_name]
+        elif predicate.operand_1.table_name == tables[0]:
+            operand_1_value = tuples[0][predicate.operand_1.column_name]
+        elif predicate.operand_1.table_name == tables[1]:
+            operand_1_value = tuples[1][predicate.operand_1.column_name]
+        elif table_cnt > 2 and predicate.operand_1.table_name == tables[2]:
+            operand_1_value = tuples[2][predicate.operand_1.column_name]
+        else:
+            raise ("operand_1 table not exists")
+    else:
+        operand_1_value = predicate.operand_1.value
+
+    if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
+        if table_cnt == 1:
+            operand_2_value = tuples[0][predicate.operand_2.column_name]
+        elif predicate.operand_2.table_name == tables[0]:
+            operand_2_value = tuples[0][predicate.operand_2.column_name]
+        elif predicate.operand_2.table_name == tables[1]:
+            operand_2_value = tuples[1][predicate.operand_2.column_name]
+        elif table_cnt > 2 and predicate.operand_2.table_name == tables[2]:
+            operand_2_value = tuples[2][predicate.operand_2.column_name]
+        else:
+            raise ("operand_2 table not exists")
+    else:
+        operand_2_value = predicate.operand_2.value
+
+    return operand_1_value, operand_2_value
+def get_operand_value_null_predicate(predicate, tables, tuples, table_cnt):
+    # TODO
+    if table_cnt == 1:
+        operand_value = tuples[0][predicate.column_name]
+    elif predicate.table_name == tables[0]:
+        operand_value = tuples[0][predicate.column_name]
+    elif predicate.table_name == tables[1]:
+        operand_value = tuples[1][predicate.column_name]
+    elif table_cnt > 2 and predicate.table_name == tables[2]:
+        operand_value = tuples[2][predicate.column_name]
+    else:
+        raise ("operand table not exists")
+    return operand_value
+
+def operate_where_clause(where_clause_result):
+    # true, false, unknown, and, or, not으로 이루어진 where clause list를 입력받아
+    # 연산자 중 depth가 높은 것을 계산하고 list 수정
+    # 반복하여 하나만 남으면 그것이 최종 결과이다.
+    if DEBUG:
+        print(where_clause_result)
+    while len(where_clause_result) > 1:
+        for idx in range(len(where_clause_result)):
+            operator = where_clause_result[idx]
+            if isinstance(operator, BooleanOperator):
+                max_depth_idx = idx  # init
+                break
+        for idx in range(len(where_clause_result)):
+            operator = where_clause_result[idx]
+            if not isinstance(operator, BooleanOperator):
+                continue
+            if operator.depth > where_clause_result[max_depth_idx].depth:
+                max_depth_idx = idx
+            # the highest priority를 가진 operator를 찾고, 해당 operator를 연산함
+
+        if where_clause_result[max_depth_idx].type == BooleanOperator.NOT:
+            operand = where_clause_result[max_depth_idx + 1]
+            result = ThreeValuedLogic.ThreeValuedNOT(operand)
+            where_clause_result[max_depth_idx] = result
+            where_clause_result.pop(max_depth_idx + 1)
+
+        elif where_clause_result[max_depth_idx].type == BooleanOperator.AND:
+            operand_1 = where_clause_result[max_depth_idx - 1]
+            operand_2 = where_clause_result[max_depth_idx + 1]
+            result = ThreeValuedLogic.ThreeValuedAND(operand_1, operand_2)
+            where_clause_result[max_depth_idx] = result
+            where_clause_result.pop(max_depth_idx + 1)
+            where_clause_result.pop(max_depth_idx - 1)
+
+        elif where_clause_result[max_depth_idx].type == BooleanOperator.OR:
+            operand_1 = where_clause_result[max_depth_idx - 1]
+            operand_2 = where_clause_result[max_depth_idx + 1]
+            result = ThreeValuedLogic.ThreeValuedOR(operand_1, operand_2)
+            where_clause_result[max_depth_idx] = result
+            where_clause_result.pop(max_depth_idx + 1)
+            where_clause_result.pop(max_depth_idx - 1)
+
+        if DEBUG:
+            for i in where_clause_result:
+                print(i, end=' ')
+            print()
+    if DEBUG:
+        print(where_clause_result)
+    return where_clause_result[0]
 
 class SQLTransformer(Transformer): # lark transformer class
     # TODO: null의 insert, delete, where clause
@@ -549,84 +718,13 @@ class SQLTransformer(Transformer): # lark transformer class
             for idx in range(len(where_clause)): # 각 tuple에 대해 각 boolean term 게산. True/False/Unknown
                 predicate = where_clause[idx]
                 if isinstance(predicate, ComparisonPredicate):
-                    if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME:
-                        operand_1_value = tuple_dict[predicate.operand_1.column_name]
-                    else:
-                        operand_1_value = predicate.operand_1.value
-                    if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
-                        operand_2_value = tuple_dict[predicate.operand_2.column_name]
-                    else:
-                        operand_2_value = predicate.operand_2.value
-
-                    if operand_1_value is None or operand_2_value is None:
-                        # null exception
-                        # 이후 null 고려할 필요 없음
-                        result = ThreeValuedLogic.UNKNOWN
-                    elif operand_1_value == ThreeValuedLogic.NULL or operand_2_value == ThreeValuedLogic.NULL:
-                        result = ThreeValuedLogic.UNKNOWN # TODO: 이거 지워도 되나
-                    else:
-                        # TODO: consider datetime comparison: predicate의 value는 time_struct로, DB file에는 str로 저장됨
-                        #if predicate.operand_1.comparable_value_type == "date":
-                        #    operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
-                        #    operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
-                        if predicate.operand_1.comparable_value_type == "date" or predicate.operand_2.comparable_value_type == "date":
-                            # TODO
-
-                            if predicate.operand_1.type == ComparisonOperand.COLUMN_NAME: # "date" type value - saved as str
-                                operand_1_value = time.strptime(operand_1_value, "%Y-%m-%d")
-                            if predicate.operand_2.type == ComparisonOperand.COLUMN_NAME:
-                                operand_2_value = time.strptime(operand_2_value, "%Y-%m-%d")
-                        operator = predicate.operator
-
-                        if operator == ComparisonPredicate.LESSTHAN:
-                            if operand_1_value < operand_2_value:
-                                result = ThreeValuedLogic.TRUE
-                            else:
-                                result = ThreeValuedLogic.FALSE
-                        elif operator == ComparisonPredicate.LESSEQUAL:
-                            if operand_1_value <= operand_2_value:
-                                result = ThreeValuedLogic.TRUE
-                            else:
-                                result = ThreeValuedLogic.FALSE
-                        elif operator == ComparisonPredicate.GREATERTHAN:
-                            if operand_1_value > operand_2_value:
-                                result = ThreeValuedLogic.TRUE
-                            else:
-                                result = ThreeValuedLogic.FALSE
-                        elif operator == ComparisonPredicate.GREATEREQUAL:
-                            if operand_1_value >= operand_2_value:
-                                result = ThreeValuedLogic.TRUE
-                            else:
-                                result = ThreeValuedLogic.FALSE
-                        elif operator == ComparisonPredicate.EQUAL:
-                            if operand_1_value == operand_2_value:
-                                result = ThreeValuedLogic.TRUE
-                            else:
-                                result = ThreeValuedLogic.FALSE
-                        elif operator == ComparisonPredicate.NOTEQUAL:
-                            if operand_1_value != operand_2_value:
-                                result = ThreeValuedLogic.TRUE
-                            else:
-                                result = ThreeValuedLogic.FALSE
-                        else:
-                            if DEBUG:
-                                print("operator: ", end='')
-                                print(operator)
-                                raise("operator err")
+                    # TODO
+                    operand_1_value, operand_2_value = get_operand_value_comparison_predicate(predicate, [table_name], [tuple_dict], 1)
+                    result = operate_comparison_predicate(predicate, operand_1_value, operand_2_value)
 
                 elif isinstance(predicate, NullPredicate):
                     operand_value = tuple_dict[predicate.column_name]
-                    print(operand_value)
-                    if predicate.is_not_null:
-                        if operand_value is not None: # TODO: null이 어떻게 저장되지?
-                            result = ThreeValuedLogic.TRUE
-                        else:
-                            result = ThreeValuedLogic.FALSE
-                    else:
-                        if operand_value is None:
-                            result = ThreeValuedLogic.TRUE
-                        else:
-                            result = ThreeValuedLogic.FALSE
+                    result = operate_null_predicate(predicate, operand_value)
                 else:
                     result = predicate
                 where_clause_result.append(result)
@@ -640,49 +738,8 @@ class SQLTransformer(Transformer): # lark transformer class
                     print(i, end=' ')
                 print()
 
-            while len(where_clause_result) > 1:
-                for idx in range(len(where_clause_result)):
-                    operator = where_clause_result[idx]
-                    if isinstance(operator, BooleanOperator):
-                        max_depth_idx = idx # init
-                        break
-
-                for idx in range(len(where_clause_result)):
-                    operator = where_clause_result[idx]
-                    if not isinstance(operator, BooleanOperator):
-                        continue
-                    if operator.depth > where_clause_result[max_depth_idx].depth:
-                        max_depth_idx = idx
-                    # the highest priority를 가진 operator를 찾고, 해당 operator를 연산함
-
-                if where_clause_result[max_depth_idx].type == BooleanOperator.NOT:
-                    operand = where_clause_result[max_depth_idx + 1]
-                    result = ThreeValuedLogic.ThreeValuedNOT(operand)
-                    where_clause_result[max_depth_idx] = result
-                    where_clause_result.pop(max_depth_idx+1)
-
-                elif where_clause_result[max_depth_idx].type == BooleanOperator.AND:
-                    operand_1 = where_clause_result[max_depth_idx - 1]
-                    operand_2 = where_clause_result[max_depth_idx + 1]
-                    result = ThreeValuedLogic.ThreeValuedAND(operand_1, operand_2)
-                    where_clause_result[max_depth_idx] = result
-                    where_clause_result.pop(max_depth_idx + 1)
-                    where_clause_result.pop(max_depth_idx - 1)
-
-                elif where_clause_result[max_depth_idx].type == BooleanOperator.OR:
-                    operand_1 = where_clause_result[max_depth_idx - 1]
-                    operand_2 = where_clause_result[max_depth_idx + 1]
-                    result = ThreeValuedLogic.ThreeValuedOR(operand_1, operand_2)
-                    where_clause_result[max_depth_idx] = result
-                    where_clause_result.pop(max_depth_idx + 1)
-                    where_clause_result.pop(max_depth_idx - 1)
-
-                if DEBUG:
-                    for i in where_clause_result:
-                        print(i, end=' ')
-                    print()
-
-            if where_clause_result[0] == ThreeValuedLogic.TRUE:
+            final = operate_where_clause(where_clause_result)
+            if final == ThreeValuedLogic.TRUE:
                 table_db.delete(key)
                 cnt += 1
             # where clause 연산 끝
@@ -729,6 +786,7 @@ class SQLTransformer(Transformer): # lark transformer class
                         col_2["table_name_called"] = True
         else:
             for i in items[1].find_data("selected_column"):
+                column_name = i.children[1].children[0].value
                 if i.children[0] is not None:
                     table_name = i.children[0].children[0].value
                     table_name_called = True
@@ -750,7 +808,6 @@ class SQLTransformer(Transformer): # lark transformer class
                         # 존재하지 않는 column
                         print("DB_2020-15127> Selection has failed: fail to resolve \'" + column_name + "\'")
                         return
-                column_name = i.children[1].children[0].value
                 selected_col_dict = {"table_name": table_name, "column_name": column_name,
                                      "table_name_called": table_name_called}
                 selected_column_list.append(selected_col_dict)
@@ -803,10 +860,10 @@ class SQLTransformer(Transformer): # lark transformer class
                         return
                     operand_1.table_name = table_name
 
-                    if operand_1.table_name not in table_list:
-                        # WhereTableNotSpecified
-                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
-                        return
+                if operand_1.table_name is not None and operand_1.table_name not in table_list:
+                    # WhereTableNotSpecified
+                    print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                    return
 
                 if operand_2.type == "column_name" and operand_2.table_name is None:
                     table_name = None
@@ -827,10 +884,10 @@ class SQLTransformer(Transformer): # lark transformer class
                         return
                     operand_2.table_name = table_name
 
-                    if operand_2.table_name not in table_list:
-                        # WhereTableNotSpecified
-                        print("DB_2020-15127> Where clause trying to reference tables which are not specified")
-                        return
+                if operand_2.table_name is not None and operand_2.table_name not in table_list:
+                    # WhereTableNotSpecified
+                    print("DB_2020-15127> Where clause trying to reference tables which are not specified")
+                    return
 
                 if operand_1.comparable_value_type == "null" or operand_2.comparable_value_type == "null":
                     pass
@@ -909,37 +966,162 @@ class SQLTransformer(Transformer): # lark transformer class
                     cursor_2 = table_db_list[2].cursor()
                     while z := cursor_2.next():
                         # TODO: where clause result
+                        key_0, value_0 = x
+                        key_1, value_1 = y
+                        key_2, value_2 = z
+                        tuple_dict_0 = eval(value_0)
+                        tuple_dict_1 = eval(value_1)
+                        tuple_dict_2 = eval(value_2) # current tuples
 
+                        tuples = [tuple_dict_0, tuple_dict_1, tuple_dict_2]
+                        where_clause_result = []
+                        for idx in range(len(where_clause)):  # 각 tuple에 대해 각 boolean term 게산. True/False/Unknown
+                            predicate = where_clause[idx]
+                            if isinstance(predicate, ComparisonPredicate):
+                                operand_1_value, operand_2_value = get_operand_value_comparison_predicate(predicate, table_list, tuples, table_count) # table_count == 3
+                                result = operate_comparison_predicate(predicate, operand_1_value, operand_2_value)
+                            elif isinstance(predicate, NullPredicate):
+                                operand_value = get_operand_value_null_predicate(predicate, table_list, tuples, table_count)
+                                result = operate_null_predicate(predicate, operand_value)
+                            else:
+                                result = predicate
+                            where_clause_result.append(result)
+
+                        if DEBUG:
+                            print("------parsed where clause------")
+                            for i in where_clause:
+                                print(i, end=' ')
+                            print("\n------where clause result------")
+                            for i in where_clause_result:
+                                print(i, end=' ')
+                            print()
+                        if not where_clause_result: # where clause has omitted at query
+                            final = ThreeValuedLogic.TRUE
+                        else:
+                            final = operate_where_clause(where_clause_result)
+                        if final == ThreeValuedLogic.TRUE:
+                            # TODO: print this
+                            for selected_col_dict in selected_column_list:
+                                col = selected_col_dict["column_name"]
+                                if selected_col_dict["table_name"] == table_list[0]:
+                                    print_value = tuples[0][col]
+                                elif selected_col_dict["table_name"] == table_list[1]:
+                                    print_value = tuples[1][col]
+                                else:
+                                    print_value = tuples[2][col]
+
+                                if print_value is None:
+                                    print_value = 'null'
+                                elif isinstance(print_value, time.struct_time):
+                                    print_value = time.strftime('%Y-%m-%d', print_value)
+                                print(strFormat % print_value, end='')
+                            print('|')
         elif table_count == 2:
-            pass
-        elif table_count == 1:
-            pass
+            cursor_0 = table_db_list[0].cursor()
+            while x := cursor_0.next():
+                cursor_1 = table_db_list[1].cursor()
+                while y := cursor_1.next():
+                    key_0, value_0 = x
+                    key_1, value_1 = y
+                    tuple_dict_0 = eval(value_0)
+                    tuple_dict_1 = eval(value_1)
 
+                    tuples = [tuple_dict_0, tuple_dict_1]
+                    where_clause_result = []
+                    for idx in range(len(where_clause)):  # 각 tuple에 대해 각 boolean term 게산. True/False/Unknown
+                        predicate = where_clause[idx]
+                        if isinstance(predicate, ComparisonPredicate):
+                            operand_1_value, operand_2_value = get_operand_value_comparison_predicate(predicate, table_list, tuples, table_count) # table_count == 2
+                            result = operate_comparison_predicate(predicate, operand_1_value, operand_2_value)
 
+                        elif isinstance(predicate, NullPredicate):
+                            operand_value = get_operand_value_null_predicate(predicate, table_list, tuples, table_count)
+                            result = operate_null_predicate(predicate, operand_value)
+                        else:
+                            result = predicate
+                        where_clause_result.append(result)
 
+                    if DEBUG:
+                        print("------parsed where clause------")
+                        for i in where_clause:
+                            print(i, end=' ')
+                        print("\n------where clause result------")
+                        for i in where_clause_result:
+                            print(i, end=' ')
+                        print()
 
-        cursor = table_db.cursor()
-        while x := cursor.next():
-            key, value = x
-            tuple_dict = eval(value.decode())
-            for col in column_list:
-                print_value = tuple_dict[col]
-                if tuple_dict[col] is None:
-                    print_value = 'null'
-                elif isinstance(tuple_dict[col], time.struct_time):
-                    print_value = time.strftime('%Y-%m-%d', tuple_dict[col])
-                print(strFormat % print_value, end='')
-            print('|')
+                    if not where_clause_result:  # where clause has omitted at query
+                        final = ThreeValuedLogic.TRUE
+                    else:
+                        final = operate_where_clause(where_clause_result)
+                    if final == ThreeValuedLogic.TRUE:
+                        for selected_col_dict in selected_column_list:
+                            col = selected_col_dict["column_name"]
+                            if selected_col_dict["table_name"] == table_list[0]:
+                                print_value = tuples[0][col]
+                            else:
+                                print_value = tuples[1][col]
+
+                            if print_value is None:
+                                print_value = 'null'
+                            elif isinstance(print_value, time.struct_time):
+                                print_value = time.strftime('%Y-%m-%d', print_value)
+                            print(strFormat % print_value, end='')
+                        print('|')
+
+        else: # table_count == 1
+            cursor_0 = table_db_list[0].cursor()
+            while x := cursor_0.next():
+                key_0, value_0 = x
+                tuple_dict_0 = eval(value_0)
+
+                tuples = [tuple_dict_0]
+                where_clause_result = []
+                for idx in range(len(where_clause)):  # 각 tuple에 대해 각 boolean term 게산. True/False/Unknown
+                    predicate = where_clause[idx]
+                    if isinstance(predicate, ComparisonPredicate):
+                        operand_1_value, operand_2_value = get_operand_value_comparison_predicate(predicate, table_list, tuples, table_count) # table_count == 1
+                        result = operate_comparison_predicate(predicate, operand_1_value, operand_2_value)
+
+                    elif isinstance(predicate, NullPredicate):
+                        operand_value = get_operand_value_null_predicate(predicate, table_list, tuples, table_count)
+                        result = operate_null_predicate(predicate, operand_value)
+                    else:
+                        result = predicate
+                    where_clause_result.append(result)
+
+                if DEBUG:
+                    print("------parsed where clause------")
+                    for i in where_clause:
+                        print(i, end=' ')
+                    print("\n------where clause result------")
+                    for i in where_clause_result:
+                        print(i, end=' ')
+                    print()
+
+                if not where_clause_result:  # where clause has omitted at query
+                    final = ThreeValuedLogic.TRUE
+                else:
+                    final = operate_where_clause(where_clause_result)
+                if final == ThreeValuedLogic.TRUE:
+                    for selected_col_dict in selected_column_list:
+                        col = selected_col_dict["column_name"]
+                        print_value = tuples[0][col]
+                        if print_value is None:
+                            print_value = 'null'
+                        elif isinstance(print_value, time.struct_time):
+                            print_value = time.strftime('%Y-%m-%d', print_value)
+                        print(strFormat % print_value, end='')
+                    print('|')
+
 
         for i in range(column_count):
             print("+", end='')
             print('-' * 20, end='')
         print('+')
 
-        table_db.close()
-
-
-
+        for table_db in table_db_list:
+            table_db.close()
 
 
         # dummy for select *
