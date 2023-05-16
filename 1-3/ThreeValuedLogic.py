@@ -1,4 +1,5 @@
 class ThreeValuedLogic:
+    # Three valued logic - and, or, not 연산
     TRUE = "true"
     FALSE = "false"
     UNKNOWN = "unknown"

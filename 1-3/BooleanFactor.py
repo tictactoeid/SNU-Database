@@ -1,5 +1,5 @@
 import time
-class BooleanOperator:
+class BooleanOperator: # and/or/not class
     AND = "and"
     OR = "or"
     NOT = "not"
@@ -11,7 +11,7 @@ class BooleanOperator:
             raise("Boolean Operator should be one of AND/OR/NOT")
     def __str__(self):
         return self.type
-class ComparisonOperand:
+class ComparisonOperand: # saves operands of comparison predicate
     # comparison_predicate | null_predicate
     # comparison_predicate : comp_operand comp_op comp_operand
     # comp_operand : comparable_value | [table_name "."] column_name
@@ -60,12 +60,12 @@ class ComparisonOperand:
     def set_comparable_value_type(self, type):
         self.comparable_value_type = type
 
-        if self.comparable_value_type == "str":
+        if self.comparable_value_type == "str": # str - char 유의
             self.comparable_value_type = "char"
             if self.value:
                 if self.value[0] == "\'" and self.value[-1] == "\'":
                     self.value = self.value[1:-1]
-        elif self.comparable_value_type == "date":
+        elif self.comparable_value_type == "date": # date의 경우 time struct로 저장
             if self.value:
                 self.value = time.strptime(self.value, "%Y-%m-%d")
         elif self.comparable_value_type == "int":
@@ -77,7 +77,7 @@ class ComparisonOperand:
             raise ("ComparisonOperand Type Error")
 
 
-class ComparisonPredicate:
+class ComparisonPredicate: # saves comparison predicate
     # operators
     LESSTHAN = "<"
     LESSEQUAL = "<="

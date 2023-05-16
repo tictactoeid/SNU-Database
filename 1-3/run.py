@@ -498,7 +498,7 @@ class SQLTransformer(Transformer): # lark transformer class
         values = []
         values_type = []
         for x in values_tree:
-            values.append(x.children[0].lower())
+            values.append(x.children[0]) # TODO: 여기에 왜 lower()가 ?
             values_type.append(x.children[0].type.lower())
 
         # TODO : check if valid
@@ -565,6 +565,67 @@ class SQLTransformer(Transformer): # lark transformer class
             # 다만, where clause에서 이를 주의해야 함.
             if DEBUG:
                 print(type(values_dict[col]))
+
+        # Optional #1: InsertDuplicatePrimaryKeyError
+        # Primary Key가 여러 개인 경우, 각 tuple의 모든 PK가 같아야 두 PK가 중복된 것으로 본다
+        cursor = table_db.cursor()
+        while x := cursor.next():
+            key, value = x
+            tuple_dict = eval(value)
+            duplicated_pk = []
+            for col in pk_list:
+                value_current = values_dict[col]
+                value_compare = tuple_dict[col]
+                if value_current == value_compare: # 현재 column의 pk가 같음
+                    duplicated_pk.append(True)
+                else:
+                    duplicated_pk.append(False) # 다름
+            if pk_list and (False not in duplicated_pk): # pk의 모든 조합이 같음
+                # InsertDuplicatePrimaryKeyError
+                print("DB_2020-15127> Insertion has failed: Primary key duplication")
+                return
+
+        # Optional #2: InsertReferentialIntegrityError
+            # TODO: multiple fk의 경우 같은 tuple에서 가져와야지 일부분씩 가져오면 안 됨
+        fk_ref_table_list = set()
+        for col_dict in columns:
+            if col_dict["column_name"] in fk_list:
+                fk_ref_table_list.add(col_dict["fk_ref_table"])
+
+        for fk_ref_table in fk_ref_table_list: # 같은 table을 여러 fk가 참조하는 경우, 해당 fk들의 "조합" 이 referencing table에 존재해야 함.
+            fk_ref_column_list = []
+            for col_dict in columns:
+                if col_dict["column_name"] in fk_list:
+                    if fk_ref_table == col_dict["fk_ref_table"]:
+                        fk_ref_column_list.append([col_dict["column_name"], col_dict["fk_ref_column"]])
+                    else:
+                        continue # 서로 다른 table을 참조하는 fk의 경우, 각각의 value가 referencing table에 존재는 해야 하나 "조합"될 필요는 없음.
+                        # 현재 확인 중인 referencing table과 현재 column(fk)가 관련없으므로 일단 넘어감
+            ref_table_db = db.DB()
+            ref_table_db.open('./DB/' + fk_ref_table + '.db', dbtype=db.DB_HASH, flags=db.DB_CREATE)
+            ref_cursor = ref_table_db.cursor()
+            #flag = False
+
+            flag = False
+            while y := ref_cursor.next():
+                ref_integrity = []
+                ref_key, ref_value = y
+                ref_tuple_dict = eval(ref_value)
+                for fk_col_pair in fk_ref_column_list:
+                    value_current = values_dict[fk_col_pair[0]]
+                    value_compare = ref_tuple_dict[fk_col_pair[1]]
+                    if value_current == value_compare:
+                        ref_integrity.append(True)
+                    else:
+                        ref_integrity.append(False)
+                if False not in ref_integrity: # 특정 table에 대한 fk의 모든 조합이 pk 조합과 같음
+                    flag = True
+                    break
+            ref_table_db.close()
+            if fk_list and (not flag):
+                # InsertReferentialIntegrityError
+                print("DB_2020-15127> Insertion has failed: Referential integrity violation")
+                return
 
         table_db.put(str(tuple_id).encode(), str(values_dict).encode()) # key is dummy, inserting value!
 
