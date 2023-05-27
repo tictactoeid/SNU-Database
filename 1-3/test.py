@@ -306,6 +306,9 @@ class SQLTransformer(Transformer): # lark transformer class
     # TODO: implement this
     # TODO: char length 초과하는 경우 잘라서
     def insert_query(self, items):
+        print(items[5].pretty())
+        return
+
         table_name = items[2].children[0].lower()
 
         table_schema = metadata.get(table_name.encode())
@@ -349,7 +352,7 @@ class SQLTransformer(Transformer): # lark transformer class
         #print()
         values = []
         for x in values_tree:
-            values.append(x.children[0].lower())
+            values.append(x.children[0])
             print(x.children[0].type) # TODO: get value type
 
             #print(x.children[0])
@@ -475,9 +478,10 @@ transformer = SQLTransformer()
 
 #output = sql_parser.parse("delete from account where or_clause = 100 or and_clause_first > 10 and and_clause_second = 30;")
 
-output = sql_parser.parse("select customer_name, borrower.loan_number, amount from borrower, loan, table_name where table_name.test > 100 or OR_CLAUSE is null;")
+#output = sql_parser.parse("select customer_name, borrower.loan_number, amount from borrower, loan, table_name where table_name.test > 100 or OR_CLAUSE is null;")
 
 #output = sql_parser.parse("select * from customer;")
+output = sql_parser.parse("insert into students values ('hi', 'NOW');")
 
 transformer.transform(output)
 #strFormat = '%-10s%-10s%-10s\n'

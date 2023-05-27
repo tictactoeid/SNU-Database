@@ -664,6 +664,7 @@ class SQLTransformer(Transformer): # lark transformer class
             cnt = 0
             while x := cursor.next():
                 key, value = x
+                # TODO: Optional #3, DeleteReferentialIntegrityPassed
                 table_db.delete(key)
                 cnt += 1
             print(f"DB_2020-15127> \'{cnt}\' row(s) are deleted")
@@ -802,6 +803,17 @@ class SQLTransformer(Transformer): # lark transformer class
 
             final = operate_where_clause(where_clause_result)
             if final == ThreeValuedLogic.TRUE:
+                # TODO: Optional #3, DeleteReferentialIntegrityPassed
+                # Optional #3
+
+
+
+
+
+                # Optional #3 end
+
+
+
                 table_db.delete(key)
                 cnt += 1
             # where clause 연산 끝
