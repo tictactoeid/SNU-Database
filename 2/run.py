@@ -29,7 +29,7 @@ def initialize_database():
         cursor.execute("create table director ( name char(100), primary key (name) );")
         cursor.execute("create table customer ( id int auto_increment, name char(100), age int, class char(100), primary key (id) );")
         cursor.execute("create table movie ( id int auto_increment, title char(100), director_name char(100), price int, primary key (id), foreign key (director_name) references director (name) );")
-        cursor.execute("create table moviecustomer ( movie_id int, customer_id int, reserve boolean, score int, reversed_price int, foreign key (customer_id) references customer (id), foreign key (movie_id) references movie (id) );")
+        cursor.execute("create table moviecustomer ( movie_id int, customer_id int, reserve boolean, score int, reserve_price int, foreign key (customer_id) references customer (id), foreign key (movie_id) references movie (id) );")
         connection.commit()
 
         data = pd.read_csv("./data.csv")
@@ -74,6 +74,7 @@ def print_movies():
                        group by id, order by id asc;")
         result = cursor.fetchall()
         print(result)
+    # TODO: 영화에 대한 평점이 존재하지 않는다면 ‘None’ 으로 출력한다.
     # YOUR CODE GOES HERE
 
 # Problem 3 (3 pt.)
@@ -91,61 +92,84 @@ def insert_movie():
     # YOUR CODE GOES HERE
     title = input('Movie title: ')
     director = input('Movie director: ')
+    price = input('Movie price: ')
+    try:
+        price = int(price)
+        if price < 0 or price > 100000:
+            print('Movie price should be from 0 to 100000')
+            return
+    except ValueError:
+        print('Movie price should be from 0 to 100000')
+        return
 
-    # error message
-    print(f'Movie {title} already exists')
-    print('Movie price should be from 0 to 100000')
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from movie where title = %s;", (title,))
+        cnt = cursor.rowcount
+        if cnt != 0:
+            print(f'Movie {title} already exists')
+            return
 
-    # success message
-    print('One movie successfully inserted')
-    # YOUR CODE GOES HERE
-    pass
+        cursor.execute("insert into director values (%s);", (director,))
+        cursor.execute("insert into movie values (%s, %s, %s);", (title, director, price))
+        print('One movie successfully inserted')
 
 
 # Problem 6 (4 pt.)
 def remove_movie():
     # YOUR CODE GOES HERE
     movie_id = input('Movie ID: ')
-
-    # error message
-    print(f'Movie {movie_id} does not exist')
-
-    # success message
-    print('One movie successfully removed')
-    # YOUR CODE GOES HERE
-    pass
-
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from movie where id = %s;", (movie_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'Movie {movie_id} does not exist')
+            return
+        cursor.execute("delete from moviecustomer where movie_id = %s;", (movie_id,))
+        cursor.execute("delete from movie where id = %s;", (movie_id,))
+        print('One movie successfully removed')
 
 # Problem 5 (4 pt.)
 def insert_user():
     # YOUR CODE GOES HERE
     name = input('User name: ')
     age = input('User age: ')
+    class_ = input('User class: ').lower() # name, title 등은 대소문자를 구분하나, class는 구분하지 않는다고 가정
+    try:
+        age = int(age)
+        if age < 12 or age > 110:
+            print('User age should be from 12 to 110')
+            return
+    except ValueError:
+        print('User age should be from 12 to 110')
+        return
+    if class_ not in ["basic", "premium", "vip"]:
+        print('User class should be basic, premium or vip')
+        return
 
-    # error message
-    print('User age should be from 12 to 110')
-    print(f'The user ({name}, {age}) already exists')
-    print('User class should be basic, premium or vip')
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from customer where name = %s and age =  %s;", (name, age))
+        cnt = cursor.rowcount
+        if cnt != 0:
+            print(f'The user ({name}, {age}) already exists')
+            return
 
-    # success message
-    print('One user successfully inserted')
-    # YOUR CODE GOES HERE
-    pass
-
+        cursor.execute("insert into customer values (%s, %s, %s);", (name, age, class_))
+        print('One user successfully inserted')
 
 # Problem 7 (4 pt.)
 def remove_user():
     # YOUR CODE GOES HERE
     user_id = input('User ID: ')
-
-    # error message
-    print(f'User {user_id} does not exist')
-
-    # success message
-    print('One user successfully removed')
-    # YOUR CODE GOES HERE
-    pass
-
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from customer where id = %s;", (user_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'User {user_id} does not exist')
+            return
+        cursor.execute("delete from moviecustomer where user_id = %s;", (user_id,))
+        cursor.execute("delete from customer where id = %s;", (user_id,))
+        print('One user successfully removed')
+    # TODO: delete 평점
 
 # Problem 8 (5 pt.)
 def book_movie():
@@ -154,16 +178,53 @@ def book_movie():
     user_id = input('User ID: ')
 
     # error message
-    print(f'Movie {movie_id} does not exist')
-    print(f'User {user_id} does not exist')
-    print(f'User {user_id} already booked movie {movie_id}')
-    print(f'Movie {movie_id} has already been fully booked')
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from movie where id = %s;", (movie_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'Movie {movie_id} does not exist')
+            return
+        result = cursor.fetchone()
+        price = result["price"]
 
-    # success message
+        cursor.execute("select * from customer where id = %s;", (user_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'User {user_id} does not exist')
+            return
+        result = cursor.fetchone()
+        class_ = result["class"]
+
+        cursor.execute("select * from moviecustomer where movie_id = %s;", (movie_id,))
+        cnt = cursor.rowcount
+        if cnt >= 10:
+            print(f'Movie {movie_id} has already been fully booked')
+            return
+
+        if class_.lower() == "basic":
+            reserve_price = price
+        elif class_.lower() == "premium":
+            reserve_price = int(price*0.75)
+        elif class_.lower() == "vip":
+            reserve_price = int(price*0.5)
+
+        cursor.execute("select * from moviecustomer where movie_id = %s and user_id = %s;", (movie_id, user_id))
+        cnt = cursor.rowcount
+        if cnt != 0:
+            # row exists
+            result = cursor.fetchone()
+            if result["reserve"]: # True
+                print(f'User {user_id} already booked movie {movie_id}')
+                return
+            # not reserved yet
+            cursor.execute("update moviecustomer set reserve = %s, reserve_price = %s where movie_id = %s and user_id = %s;", (True, reserve_price, movie_id, user_id))
+
+        else:
+            # row not exists
+            cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);", (movie_id, user_id, True, 0, reserve_price))
+
     print('Movie successfully booked')
     # YOUR CODE GOES HERE
-    pass
-
 
 # Problem 9 (5 pt.)
 def rate_movie():
