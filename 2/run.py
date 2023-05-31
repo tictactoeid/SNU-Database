@@ -4,7 +4,6 @@ import pandas as pd
 import mysql.connector
 
 connection = mysql.connector.connect(
-    #auth_plugin='mysql_native_password',
     host='astronaut.snu.ac.kr',
     port=7000,
     user='DB2020_15127',
@@ -13,12 +12,12 @@ connection = mysql.connector.connect(
     charset='utf8'
 )
 
-DEBUG = True # TODO: make it False
+#DEBUG = False # TODO: make it False
 # TODO: connection.commit()
 
-DIRECTOR_TABLE_CREATE = "create table director ( name char(100), primary key (name) );"
-CUSTOMER_TABLE_CREATE = "create table customer ( id int auto_increment, name char(100), age int, class char(100), primary key (id) );"
-MOVIE_TABLE_CREATE = "create table movie ( id int auto_increment, title char(100), director_name char(100), price int, primary key (id), foreign key (director_name) references director (name) );"
+DIRECTOR_TABLE_CREATE = "create table director ( name varchar(255), primary key (name) );"
+CUSTOMER_TABLE_CREATE = "create table customer ( id int auto_increment, name varchar(255), age int, class varchar(255), primary key (id) );"
+MOVIE_TABLE_CREATE = "create table movie ( id int auto_increment, title varchar(255), director_name varchar(255), price int, primary key (id), foreign key (director_name) references director (name) );"
 MOVIECUSTOMER_TABLE_CREATE = "create table moviecustomer ( movie_id int, customer_id int, reserve boolean, score int, reserve_price int, foreign key (customer_id) references customer (id), foreign key (movie_id) references movie (id) );"
 
 
@@ -57,19 +56,94 @@ def initialize_database():
             price = row["price"]
             name = row["name"]
             age = row["age"]
-            class_ = row["class"]
+            class_ = row["class"].lower()
 
             #sql = "insert into director values (%s);"
             #val = (director,)
             #cursor.execute(sql, val)
-            cursor.execute("insert into director values (%s);", (director,))
-            cursor.execute("insert into movie values (%s, %s, %s);", (title, director, price))
-            movie_id = connection.insert_id()
-            cursor.execute("insert into customer values (%s, %s, %s);", (name, age, class_))
-            customer_id = connection.insert_id()
-            #cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);", (movie_id, customer_id, False, None, None));
-            # TODO: 이걸 굳이 여기서 넣을 필요가 없을지도?
-            connection.commit()
+
+            # TODO: invalid row시 전부 취소하게
+
+            # insert 전 예외 처리 먼저
+            if type(price) != int or price < 0 or price > 100000:
+                #print('Movie price should be from 0 to 100000')
+                continue
+            if type(age) != int or age < 12 or age > 110:
+                #print('User age should be from 12 to 110')
+                continue
+            if class_ not in ["basic", "premium", "vip"]:
+                #print('User class should be basic, premium or vip')
+                continue
+
+            # inserting movie
+            # (제목, 감독이름)이 같은 경우 같은 영화로 판단
+            # 제목은 같으나, 감독이름이 다른 경우 잘못된 input으로 판단, 해당 row 전체를 무시
+            # user의 경우 이름은 같고 나이가 다른 경우는 없다고 명시되어 있으나, 영화는 그렇지 않아 임의로 가정하였습니다
+            with connection.cursor(dictionary=True) as cursor:
+
+                # insert director & movie
+                cursor.execute("select * from movie where title = %s;", (title,))
+                cnt = cursor.rowcount
+                if cnt != 0:
+                    #print(f'Movie {title} already exists')
+                    result = cursor.fetchone()
+                    if director != result["director"]:
+                        continue
+                    movie_id = result["id"]
+                else:
+                    cursor.execute("insert into director values (%s);", (director,))
+                    cursor.execute("insert into movie values (%s, %s, %s);", (title, director, price))
+                    movie_id = connection.insert_id()
+
+                # insert customer
+                cursor.execute("select * from customer where name = %s and age =  %s;", (name, age))
+                cnt = cursor.rowcount
+                if cnt != 0:
+                    # 이미 존재하는 customer
+                    # 한 customer가 여러 영화 볼 수도 있으므로, error 처리하지는 않음
+                    result = cursor.fetchone()
+                    user_id = result["id"]
+                else:
+                    # 새로운 user
+                    cursor.execute("insert into customer values (%s, %s, %s);", (name, age, class_))
+                    user_id = connection.insert_id()
+
+                # 예매
+                cursor.execute("select * from moviecustomer where movie_id = %s;", (movie_id,))
+                cnt = cursor.rowcount
+                if cnt >= 10:
+                    #print(f'Movie {movie_id} has already been fully booked')
+                    continue
+                    # 해당 row 예외 처리
+                    # commit()하지 않았으므로 앞선 insert는 반영되지 않고, 해당 row 자체를 건너뜀
+                if class_.lower() == "basic":
+                    reserve_price = price
+                elif class_.lower() == "premium":
+                    reserve_price = int(price * 0.75)
+                elif class_.lower() == "vip":
+                    reserve_price = int(price * 0.5)
+
+                cursor.execute("select * from moviecustomer where movie_id = %s and customer_id = %s;",
+                               (movie_id, user_id))
+                cnt = cursor.rowcount
+                if cnt != 0:
+                    # row exists
+                    result = cursor.fetchone()
+                    if result["reserve"]:  # True
+                        # 이미 예매함
+                        # 예외 처리
+                        continue
+                    # moviecustomer가 존재하지만, 예매하지 않은 경우 (reserve = False)
+                    cursor.execute(
+                        "update moviecustomer set reserve = %s, reserve_price = %s where movie_id = %s and customer_id = %s;",
+                        (True, reserve_price, movie_id, user_id))
+                else:
+                    # row not exists
+                    cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);",
+                                   (movie_id, user_id, True, None, reserve_price))
+
+                # 모든 예외 처리 끝났으므로 commit
+                connection.commit()
 
     print('Database successfully initialized')
     # YOUR CODE GOES HERE
@@ -83,6 +157,7 @@ def reset():
         cursor.execute("drop table customer;")
         cursor.execute("drop table movie;")
         cursor.execute("drop table moviecustomer;")
+        connection.commit()
 
     initialize_database()
     # TODO
@@ -131,6 +206,7 @@ def insert_movie():
 
         cursor.execute("insert into director values (%s);", (director,))
         cursor.execute("insert into movie values (%s, %s, %s);", (title, director, price))
+        connection.commit()
         print('One movie successfully inserted')
 
 
@@ -146,6 +222,7 @@ def remove_movie():
             return
         cursor.execute("delete from moviecustomer where movie_id = %s;", (movie_id,))
         cursor.execute("delete from movie where id = %s;", (movie_id,))
+        connection.commit()
         print('One movie successfully removed')
 
 # Problem 5 (4 pt.)
@@ -169,6 +246,7 @@ def insert_user():
             return
 
         cursor.execute("insert into customer values (%s, %s, %s);", (name, age, class_))
+        connection.commit()
         print('One user successfully inserted')
 
 # Problem 7 (4 pt.)
@@ -183,6 +261,7 @@ def remove_user():
             return
         cursor.execute("delete from moviecustomer where customer_id = %s;", (user_id,))
         cursor.execute("delete from customer where id = %s;", (user_id,))
+        connection.commit()
         print('One user successfully removed')
     # TODO: delete 평점
 
@@ -237,7 +316,7 @@ def book_movie():
         else:
             # row not exists
             cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);", (movie_id, user_id, True, None, reserve_price))
-
+    connection.commit()
     print('Movie successfully booked')
     # YOUR CODE GOES HERE
 
@@ -279,6 +358,7 @@ def rate_movie():
         cursor.execute("update moviecustomer set score = %s where movie_id = %s and customer_id = %s;", (rating, movie_id, user_id))
 
     # success message
+    connection.commit()
     print('Movie successfully rated')
     # YOUR CODE GOES HERE
 
