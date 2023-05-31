@@ -16,20 +16,38 @@ connection = mysql.connector.connect(
 DEBUG = True # TODO: make it False
 # TODO: connection.commit()
 
+DIRECTOR_TABLE_CREATE = "create table director ( name char(100), primary key (name) );"
+CUSTOMER_TABLE_CREATE = "create table customer ( id int auto_increment, name char(100), age int, class char(100), primary key (id) );"
+MOVIE_TABLE_CREATE = "create table movie ( id int auto_increment, title char(100), director_name char(100), price int, primary key (id), foreign key (director_name) references director (name) );"
+MOVIECUSTOMER_TABLE_CREATE = "create table moviecustomer ( movie_id int, customer_id int, reserve boolean, score int, reserve_price int, foreign key (customer_id) references customer (id), foreign key (movie_id) references movie (id) );"
+
+
+
 # Problem 1 (5 pt.)
 def initialize_database():
     # YOUR CODE GOES HERE
     # TODO: ID
     with connection.cursor(dictionary=True) as cursor:
-        cursor.execute("drop table director;")
-        cursor.execute("drop table customer;")
-        cursor.execute("drop table movie;")
-        cursor.execute("drop table moviecustomer;")
+        cursor.execute("show tables like 'director';")
+        result = cursor.fetchall()
+        if len(result) == 0:
+            cursor.execute(DIRECTOR_TABLE_CREATE)
 
-        cursor.execute("create table director ( name char(100), primary key (name) );")
-        cursor.execute("create table customer ( id int auto_increment, name char(100), age int, class char(100), primary key (id) );")
-        cursor.execute("create table movie ( id int auto_increment, title char(100), director_name char(100), price int, primary key (id), foreign key (director_name) references director (name) );")
-        cursor.execute("create table moviecustomer ( movie_id int, customer_id int, reserve boolean, score int, reserve_price int, foreign key (customer_id) references customer (id), foreign key (movie_id) references movie (id) );")
+        cursor.execute("show tables like 'customer';")
+        result = cursor.fetchall()
+        if len(result) == 0:
+            cursor.execute(CUSTOMER_TABLE_CREATE)
+
+        cursor.execute("show tables like 'movie';")
+        result = cursor.fetchall()
+        if len(result) == 0:
+            cursor.execute(MOVIE_TABLE_CREATE)
+
+        cursor.execute("show tables like 'moviecustomer';")
+        result = cursor.fetchall()
+        if len(result) == 0:
+            cursor.execute(MOVIECUSTOMER_TABLE_CREATE)
+
         connection.commit()
 
         data = pd.read_csv("./data.csv")
@@ -49,7 +67,8 @@ def initialize_database():
             movie_id = connection.insert_id()
             cursor.execute("insert into customer values (%s, %s, %s);", (name, age, class_))
             customer_id = connection.insert_id()
-            cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);", (movie_id, customer_id, False, None, None));
+            #cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);", (movie_id, customer_id, False, None, None));
+            # TODO: 이걸 굳이 여기서 넣을 필요가 없을지도?
             connection.commit()
 
     print('Database successfully initialized')
@@ -59,6 +78,12 @@ def initialize_database():
 # Problem 15 (5 pt.)
 def reset():
     # YOUR CODE GOES HERE
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("drop table director;")
+        cursor.execute("drop table customer;")
+        cursor.execute("drop table movie;")
+        cursor.execute("drop table moviecustomer;")
+
     initialize_database()
     # TODO
     # YOUR CODE GOES HERE
@@ -93,12 +118,7 @@ def insert_movie():
     title = input('Movie title: ')
     director = input('Movie director: ')
     price = input('Movie price: ')
-    try:
-        price = int(price)
-        if price < 0 or price > 100000:
-            print('Movie price should be from 0 to 100000')
-            return
-    except ValueError:
+    if type(price) != int or price < 0 or price > 100000:
         print('Movie price should be from 0 to 100000')
         return
 
@@ -134,12 +154,7 @@ def insert_user():
     name = input('User name: ')
     age = input('User age: ')
     class_ = input('User class: ').lower() # name, title 등은 대소문자를 구분하나, class는 구분하지 않는다고 가정
-    try:
-        age = int(age)
-        if age < 12 or age > 110:
-            print('User age should be from 12 to 110')
-            return
-    except ValueError:
+    if type(age) != int or age < 12 or age > 110:
         print('User age should be from 12 to 110')
         return
     if class_ not in ["basic", "premium", "vip"]:
@@ -166,7 +181,7 @@ def remove_user():
         if cnt == 0:
             print(f'User {user_id} does not exist')
             return
-        cursor.execute("delete from moviecustomer where user_id = %s;", (user_id,))
+        cursor.execute("delete from moviecustomer where customer_id = %s;", (user_id,))
         cursor.execute("delete from customer where id = %s;", (user_id,))
         print('One user successfully removed')
     # TODO: delete 평점
@@ -208,7 +223,7 @@ def book_movie():
         elif class_.lower() == "vip":
             reserve_price = int(price*0.5)
 
-        cursor.execute("select * from moviecustomer where movie_id = %s and user_id = %s;", (movie_id, user_id))
+        cursor.execute("select * from moviecustomer where movie_id = %s and customer_id = %s;", (movie_id, user_id))
         cnt = cursor.rowcount
         if cnt != 0:
             # row exists
@@ -217,11 +232,11 @@ def book_movie():
                 print(f'User {user_id} already booked movie {movie_id}')
                 return
             # not reserved yet
-            cursor.execute("update moviecustomer set reserve = %s, reserve_price = %s where movie_id = %s and user_id = %s;", (True, reserve_price, movie_id, user_id))
+            cursor.execute("update moviecustomer set reserve = %s, reserve_price = %s where movie_id = %s and customer_id = %s;", (True, reserve_price, movie_id, user_id))
 
         else:
             # row not exists
-            cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);", (movie_id, user_id, True, 0, reserve_price))
+            cursor.execute("insert into moviecustomer values (%s, %s, %s, %s, %s);", (movie_id, user_id, True, None, reserve_price))
 
     print('Movie successfully booked')
     # YOUR CODE GOES HERE
@@ -232,40 +247,80 @@ def rate_movie():
     movie_id = input('Movie ID: ')
     user_id = input('User ID: ')
     rating = input('Ratings (1~5): ')
+    if rating not in [1, 2, 3, 4, 5]:
+        print(f'Wrong value for a rating')
+        return
 
-    # error message
-    print(f'Movie {movie_id} does not exist')
-    print(f'User {user_id} does not exist')
-    print(f'Wrong value for a rating')
-    print(f'User {user_id} has not booked movie {movie_id} yet')
-    print(f'User {user_id} has already rated movie {movie_id}')
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from movie where id = %s;", (movie_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'Movie {movie_id} does not exist')
+            return
+
+        cursor.execute("select * from customer where id = %s;", (user_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'User {user_id} does not exist')
+            return
+
+        cursor.execute("select * from moviecustomer where movie_id = %s and customer_id = %s;", (movie_id, user_id))
+        result = cursor.fetchone()
+        if not result:
+            print(f'User {user_id} has not booked movie {movie_id} yet')
+            return
+        if not result["reserved"]:
+            print(f'User {user_id} has not booked movie {movie_id} yet')
+            return
+        if result["score"]:
+            print(f'User {user_id} has already rated movie {movie_id}')
+            return
+
+        cursor.execute("update moviecustomer set score = %s where movie_id = %s and customer_id = %s;", (rating, movie_id, user_id))
 
     # success message
     print('Movie successfully rated')
     # YOUR CODE GOES HERE
-    pass
-
 
 # Problem 10 (5 pt.)
 def print_users_for_movie():
     # YOUR CODE GOES HERE
-    user_id = input('User ID: ')
+    movie_id = input('Movie ID: ')
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from movie where id = %s;", (movie_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'Movie {movie_id} does not exist')
+            return
 
-    # error message
-    print(f'User {user_id} does not exist')
+        # TODO: moviecustomer 없는 경우? -> 생각해보니 그런경우는업따.
+
+        cursor.execute("select id, name, age, reserve_price, score from customer, moviecustomer \
+                        where customer.id = moviecustomer.customer_id and movie_id = %s \
+                        and reserve = True \
+                        order by id asc;")
+        result = cursor.fetchall()
+        print(result)
+
     # YOUR CODE GOES HERE
-    pass
 
 
 # Problem 11 (5 pt.)
 def print_movies_for_user():
     # YOUR CODE GOES HERE
     user_id = input('User ID: ')
+    with connection.cursor(dictionary=True) as cursor:
+        cursor.execute("select * from customer where id = %s;", (user_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'User {user_id} does not exist')
+            return
 
-    # error message
-    print(f'User {user_id} does not exist')
+        cursor.execute("select id, title, director, reserve_price, score from movie, moviecustomer \
+                        where movie.id = moviecustomer.movie_id and \
+                        reserve = True \
+                        order by id asc;")
     # YOUR CODE GOES HERE
-    pass
 
 
 # Problem 12 (6 pt.)
