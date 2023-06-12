@@ -82,7 +82,7 @@ def initialize_database():
             #cursor.execute(sql, val)
 
             # TODO: invalid row시 전부 취소하게
-
+            # TODO: error msg 띄워야 함?
             # insert 전 예외 처리 먼저
             if type(price) != int or price < 0 or price > 100000:
                 #print('Movie price should be from 0 to 100000')
@@ -545,10 +545,6 @@ def recommend_popularity():
 
         # where문에서 id compare 시 해당 movie가 아니라 join된 row 하나만 뺴는 버그 있음
 
-
-
-
-
         result = cursor.fetchall()
         max_score = None
         max_score_id = None
@@ -655,13 +651,123 @@ def recommend_item_based():
     # YOUR CODE GOES HERE
     user_id = int(input('User ID: '))
     rec_count = int(input('Recommend Count: '))
+    with connection.cursor(dictionary=True, buffered=True) as cursor:
+        cursor.execute("select * from customer where id = %s;", (user_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print(f'User {user_id} does not exist')
+            return
+        cursor.execute("select * from moviecustomer \
+                        where customer_id = %s and \
+                        score is not null;", (user_id,))
+        cnt = cursor.rowcount
+        if cnt == 0:
+            print('Rating does not exist')
+            return
+
+        # 어떤 영화에도 평점을 매기지 않은 고객은 matrix를 생성 시 제외
+        cursor.execute("select customer_id, count(score) from moviecustomer \
+                        group by customer_id;") # score가 null이면 자동 제외
+        result = cursor.fetchall()
+        matrix_users = [] # matrix의 user order
+        for row in result:
+            if row["count(score)"] > 0:
+                matrix_users.append(row["customer_id"])
+        user_cnt = len(matrix_users) # TODO: 이거 0이면 어캄
+
+        cursor.execute("select id from movie order by id asc;")
+        movie_ids = cursor.fetchall()
+        movie_cnt = len(movie_ids)
+
+        matrix_item = [[0 for _ in range(movie_cnt)] for _ in range(user_cnt)] # users 행 movies 열
+
+        cursor.execute("select movie_id, customer_id, score from moviecustomer where score is not null order by movie_id asc;")
+        result = cursor.fetchall()
+        for row in result:
+            user_idx = matrix_users.index(row["customer_id"])
+            matrix_item[user_idx][row["movie_id"]] = row["score"] # user-item matrix 초기화
+
+        # ith row: matrix_users[i] 에 해당하는 user
+        # jth column: movie_ids[j]에 해당하는 movie
+
+        for current_movie in range(movie_cnt): # 평균으로 임시 평점 부여
+            cnt = 0
+            avg = 0
+            for i in range(len(matrix_item)):
+                if matrix_item[i][current_movie] != 0:
+                    cnt += 1
+                    avg += matrix_item[i][current_movie]
+            if cnt == 0:
+                continue
+            avg /= cnt
+            for i in range(len(matrix_item)):
+                if matrix_item[i][current_movie] == 0:
+                    matrix_item[i][current_movie] = avg
+
+        matrix_similarity = [[0 for _ in range(movie_cnt)] for _ in range(movie_cnt)]
+        # TODO: movie * movie 맞나
+        matrix_item_avg = 0
+        for i in range(len(matrix_item)):
+            for j in range(len(matrix_item[0])):
+                matrix_item_avg += matrix_item[i][j]
+        matrix_item_avg /= (user_cnt * movie_cnt)
+
+        for i in range(movie_cnt):
+            for j in range(movie_cnt):
+                if i==j:
+                    matrix_similarity[i][j] = 1
+                elif i<j:
+                    # TODO
+                    sum_ab = 0
+                    sum_sqrt_a = 0
+                    sum_sqrt_b = 0
+                    for usr in range(user_cnt):
+                        a_i = matrix_item[usr][i]
+                        b_i = matrix_item[usr][j]
+                        sum_ab += (a_i-matrix_item_avg) * (b_i-matrix_item_avg)
+                        sum_sqrt_a += (a_i-matrix_item_avg) * (a_i-matrix_item_avg)
+                        sum_sqrt_b += (b_i-matrix_item_avg) * (b_i-matrix_item_avg)
+                    sum_sqrt_a = pow(sum_sqrt_a, 0.5)
+                    sum_sqrt_b = pow(sum_sqrt_b, 0.5)
+
+                    matrix_similarity[i][j] = round(sum_ab / (sum_sqrt_a * sum_sqrt_b), 5)
+
+                else:
+                    continue # symmetric
+
+        for i in range(movie_cnt):
+            for j in range(movie_cnt):
+                if i<=j:
+                    continue
+                else:
+                    matrix_similarity[i][j] = matrix_similarity[j][i]
+
+        cursor.execute("select movie_id from moviecustomer \
+                        where customer_id = %s and \
+                        score is null;", (user_id, ))
+        result = cursor.fetchall()
+        i = matrix_users.index(user_id)
+        for row in result:
+            j = movie_ids.index(row["movie_id"])
+            matrix_item[i][j] = None # 임시 평점 -> None
+
+        # weighted sum
+        for j in range(movie_cnt): # user i, item j에 대하여 item j의 평점을 weighted sum으로 계산
+            if matrix_item[i][j] is not None:
+                continue
+            weighted_sum = 0
+            weights = 0
+            for k in range(movie_cnt): # item j, item k의 similarity
+                if matrix_item[i][k] is None:
+                    continue
+                current_weight = matrix_similarity[j][k]
+                weights += current_weight
+                weighted_sum += current_weight * matrix_item[i][k]
+            weighted_sum /= weights
 
 
-    # error message
-    print(f'User {user_id} does not exist')
-    print('Rating does not exist')
-    # YOUR CODE GOES HERE
-    pass
+
+
 
 
 # Total of 70 pt.
