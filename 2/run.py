@@ -168,6 +168,7 @@ def initialize_database():
 
 # Problem 15 (5 pt.)
 def reset():
+    # TODO: 삭제 실시 전 확인 메시지를 띄우고 사용자 입력(y/n)을 받아야 한다
     # YOUR CODE GOES HERE
     with connection.cursor(dictionary=True) as cursor:
         # TODO: 순서 중요 - foreign key constraint
@@ -273,7 +274,10 @@ def insert_movie():
             print(f'Movie {title} already exists')
             return
 
-        cursor.execute("insert into director values (%s);", (director,))
+        cursor.execute("select * from director where name = %s;", (director,))
+        if cursor.rowcount == 0:
+            cursor.execute("insert into director values (%s);", (director,))
+
         cursor.execute("insert into movie (title, director, price) values (%s, %s, %s);", (title, director, price))
         connection.commit()
         print('One movie successfully inserted')
@@ -676,7 +680,10 @@ def recommend_item_based():
         user_cnt = len(matrix_users) # TODO: 이거 0이면 어캄
 
         cursor.execute("select id from movie order by id asc;")
-        movie_ids = cursor.fetchall()
+        result = cursor.fetchall()
+        movie_ids = []
+        for row in result:
+            movie_ids.append(row["id"])
         movie_cnt = len(movie_ids)
 
         matrix_item = [[0 for _ in range(movie_cnt)] for _ in range(user_cnt)] # users 행 movies 열
@@ -685,7 +692,8 @@ def recommend_item_based():
         result = cursor.fetchall()
         for row in result:
             user_idx = matrix_users.index(row["customer_id"])
-            matrix_item[user_idx][row["movie_id"]] = row["score"] # user-item matrix 초기화
+            movie_idx = movie_ids.index(row["movie_id"])
+            matrix_item[user_idx][movie_idx] = row["score"] # user-item matrix 초기화
 
         # ith row: matrix_users[i] 에 해당하는 user
         # jth column: movie_ids[j]에 해당하는 movie
@@ -703,6 +711,12 @@ def recommend_item_based():
             for i in range(len(matrix_item)):
                 if matrix_item[i][current_movie] == 0:
                     matrix_item[i][current_movie] = avg
+
+        if DEBUG:
+            for i in range(user_cnt):
+                for j in range(movie_cnt):
+                    print(matrix_item[i][j], end=' ')
+                print()
 
         matrix_similarity = [[0 for _ in range(movie_cnt)] for _ in range(movie_cnt)]
         # TODO: movie * movie 맞나
@@ -742,33 +756,96 @@ def recommend_item_based():
                 else:
                     matrix_similarity[i][j] = matrix_similarity[j][i]
 
+        if DEBUG:
+            for i in range(movie_cnt):
+                for j in range(movie_cnt):
+                    print(matrix_similarity[i][j], end=' ')
+                print()
+
         cursor.execute("select movie_id from moviecustomer \
                         where customer_id = %s and \
-                        score is null;", (user_id, ))
+                        score is not null;", (user_id, ))
         result = cursor.fetchall()
-        i = matrix_users.index(user_id)
+        scored_movies_idx = []
         for row in result:
-            j = movie_ids.index(row["movie_id"])
-            matrix_item[i][j] = None # 임시 평점 -> None
+            scored_movies_idx.append(movie_ids.index(row["movie_id"]))
+
+
+        cursor.execute("select movie_id from moviecustomer where customer_id = %s;", (user_id,))
+        result = cursor.fetchall()
+        watched_movies_idx = []
+        for row in result:
+            watched_movies_idx.append(movie_ids.index(row["movie_id"]))
+
+        i = matrix_users.index(user_id)
+        pred_scores = matrix_item[i].copy() # deep copy
+
 
         # weighted sum
         for j in range(movie_cnt): # user i, item j에 대하여 item j의 평점을 weighted sum으로 계산
-            if matrix_item[i][j] is not None:
+            if j in scored_movies_idx:
                 continue
             weighted_sum = 0
             weights = 0
             for k in range(movie_cnt): # item j, item k의 similarity
-                if matrix_item[i][k] is None:
+                if j == k:
                     continue
                 current_weight = matrix_similarity[j][k]
                 weights += current_weight
-                weighted_sum += current_weight * matrix_item[i][k]
+                weighted_sum += current_weight * matrix_item[i][k] # pred_scores는 값이 계속 변하기 때문에...
+                if DEBUG:
+                    print(f"{current_weight}    {matrix_item[i][k]}")
             weighted_sum /= weights
+            pred_scores[j] = weighted_sum
+            # TODO: 임시 평점도 써야 함
 
+        if DEBUG:
+            print(pred_scores)
 
+        predicted_scores_dict = {}
+        for j in range(movie_cnt):
+            if j not in watched_movies_idx:
+                predicted_scores_dict[j] = pred_scores[j] # {index : predicted score}
 
+        recommend_dict = sorted(predicted_scores_dict.items(), key=lambda item: item[1], reverse=True)
+        if DEBUG:
+            print(recommend_dict)
+        # predicted score의 내림차순으로 sort
 
+        print_col_names = ("id", "title", "res. price", "avg. rating", "expected rating")
 
+        print('-' * 80)
+        strFormat = "%-4s%-37s%-12s%-12s%-15s"
+        print(strFormat % print_col_names)
+        print('-' * 80)
+
+        cursor.execute("select class from customer where id = %s;", (user_id,))
+        result = cursor.fetchone()
+        class_ = result["class"]
+
+        cnt = 0
+        for index, predicted_score in recommend_dict:
+            if index in watched_movies_idx:
+                continue
+            cursor.execute("select id, title, price, avg(score) from movie, moviecustomer \
+                            where movie.id = moviecustomer.movie_id and \
+                            id = %s \
+                            group by id;", (movie_ids[index],))
+            result = cursor.fetchone()
+            id = result["id"]
+            title = result["title"]
+            price = result["price"]
+            avg_score = result["avg(score)"]
+
+            reserve_price = get_reserve_price(price, class_)
+
+            print_values = (id, title, reserve_price, avg_score, round(predicted_score, 5))
+
+            print(strFormat % print_values)
+            cnt += 1
+            if cnt >= rec_count:
+                break
+        print('-' * 80)
 
 # Total of 70 pt.
 def main():
