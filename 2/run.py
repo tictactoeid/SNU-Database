@@ -1,5 +1,3 @@
-#import pymysql
-import numpy as np
 import pandas as pd
 import mysql.connector
 
@@ -12,7 +10,7 @@ connection = mysql.connector.connect(
     charset='utf8'
 )
 
-DEBUG = True # TODO: make it False
+DEBUG = False # TODO: make it False
 # TODO: connection.commit()
 
 DIRECTOR_TABLE_CREATE = "create table director ( name varchar(255), primary key (name) );"
@@ -20,8 +18,6 @@ CUSTOMER_TABLE_CREATE = "create table customer ( id int auto_increment, name var
 MOVIE_TABLE_CREATE = "create table movie ( id int auto_increment, title varchar(255), director varchar(255), price int, primary key (id), foreign key (director) references director (name) );"
 MOVIECUSTOMER_TABLE_CREATE = "create table moviecustomer ( movie_id int, customer_id int, score int, reserve_price int, foreign key (customer_id) references customer (id), foreign key (movie_id) references movie (id) );"
 
-# TODO: moviecustomer의 reserve column 삭제
-# TODO: row가 존재하는 것 자체로 예매한 것으로 간주할 것
 
 def get_reserve_price(price, class_):
     class_ = class_.lower()
@@ -37,9 +33,8 @@ def get_reserve_price(price, class_):
 
 # Problem 1 (5 pt.)
 def initialize_database():
-    # YOUR CODE GOES HERE
-    # TODO: ID
     with connection.cursor(dictionary=True, buffered=True) as cursor:
+        # table이 없다면 create
         cursor.execute("show tables like 'director';")
         result = cursor.fetchall()
         if len(result) == 0:
@@ -64,12 +59,6 @@ def initialize_database():
 
         data = pd.read_csv("./data.csv")
         for row in data.iterrows():
-            if DEBUG:
-                #print(row)
-                #print(type(row))
-                #print(row[1])
-                #print(row[1]["title"])
-                pass
             title = row[1]["title"]
             director = row[1]["director"]
             price = row[1]["price"]
@@ -77,27 +66,22 @@ def initialize_database():
             age = row[1]["age"]
             class_ = row[1]["class"].lower()
 
-            #sql = "insert into director values (%s);"
-            #val = (director,)
-            #cursor.execute(sql, val)
-
-            # TODO: invalid row시 전부 취소하게
-            # TODO: error msg 띄워야 함?
             # insert 전 예외 처리 먼저
+            # qna 답변에 기반하여, 각 instance별로 error msg를 띄우게 구현
             if type(price) != int or price < 0 or price > 100000:
-                #print('Movie price should be from 0 to 100000')
+                print('Movie price should be from 0 to 100000')
                 continue
             if type(age) != int or age < 12 or age > 110:
-                #print('User age should be from 12 to 110')
+                print('User age should be from 12 to 110')
                 continue
             if class_ not in ["basic", "premium", "vip"]:
-                #print('User class should be basic, premium or vip')
+                print('User class should be basic, premium or vip')
                 continue
 
             # inserting movie
             # (제목, 감독이름)이 같은 경우 같은 영화로 판단
             # 제목은 같으나, 감독이름이 다른 경우 잘못된 input으로 판단, 해당 row 전체를 무시
-            # user의 경우 이름은 같고 나이가 다른 경우는 없다고 명시되어 있으나, 영화는 그렇지 않아 임의로 가정하였습니다
+            # user의 경우 이름은 같고 나이가 다른 경우는 없다고 명시되어 있으나, 영화는 그렇지 않아 임의로 가정
             with connection.cursor(dictionary=True, buffered=True) as cursor:
                 # insert director
                 cursor.execute("select * from director where name = %s;", (director,))
@@ -109,17 +93,14 @@ def initialize_database():
                 cursor.execute("select * from movie where title = %s;", (title,))
                 cnt = cursor.rowcount
                 if cnt != 0:
-                    #print(f'Movie {title} already exists')
                     result = cursor.fetchone()
-                    if DEBUG:
-                        #print(result)
-                        #print(type(result))
-                        pass
                     if director != result["director"]:
-                        continue
-                    movie_id = result["id"]
+                        print(f'Movie {title} already exists')
+                        # 제목은 같으나 director가 다른 경우
+                        # 영화 제목 중복 오류로 판단하도록 가정
+                        continue # commit() 전에 continue하면 앞선 insert가 DB에 반영되지 않음
+                    movie_id = result["id"] # 제목과 director가 같은 경우, 그냥 같은 영화를 여러 번 예매하는 것으로
                 else:
-
                     cursor.execute("insert into movie (title, director, price) values (%s, %s, %s);", (title, director, price))
                     movie_id = cursor.lastrowid
 
@@ -132,7 +113,7 @@ def initialize_database():
                     result = cursor.fetchone()
                     user_id = result["id"]
                 else:
-                    # 새로운 user
+                    # 새로운 user insert
                     cursor.execute("insert into customer (name, age, class) values (%s, %s, %s);", (name, age, class_))
                     user_id = cursor.lastrowid
 
@@ -141,18 +122,16 @@ def initialize_database():
 
                 cnt = cursor.rowcount
                 if cnt >= 10:
-                    #print(f'Movie {movie_id} has already been fully booked')
+                    print(f'Movie {movie_id} has already been fully booked')
                     continue
-                    # 해당 row 예외 처리
-                    # commit()하지 않았으므로 앞선 insert는 반영되지 않고, 해당 row 자체를 건너뜀
-                    # TODO: 앞선 insert 정말 반영되지 않았는지 확인
                 reserve_price = get_reserve_price(price, class_)
 
                 cursor.execute("select * from moviecustomer where movie_id = %s and customer_id = %s;",
                                (movie_id, user_id))
                 cnt = cursor.rowcount
                 if cnt != 0:
-                    # row exists
+                    # row exists, 이미 예매함
+                    print(f'User {user_id} has already booked movie {movie_id}')
                     continue
                 else:
                     # row not exists
@@ -163,19 +142,19 @@ def initialize_database():
                 connection.commit()
 
     print('Database successfully initialized')
-    # YOUR CODE GOES HERE
-
 
 # Problem 15 (5 pt.)
 def reset():
-    # TODO: 삭제 실시 전 확인 메시지를 띄우고 사용자 입력(y/n)을 받아야 한다
-    # YOUR CODE GOES HERE
     with connection.cursor(dictionary=True) as cursor:
-        # TODO: 순서 중요 - foreign key constraint
+        # 순서 중요 - foreign key constraint
         cursor.execute("show tables like 'moviecustomer';")
         result = cursor.fetchall()
         if len(result) != 0:
-            cursor.execute("drop table moviecustomer;")
+            yn = input("Are you sure to drop tables? (y/n)") # 삭제 전 확인
+            if yn == "y":
+                cursor.execute("drop table moviecustomer;")
+            else:
+                return
 
         cursor.execute("show tables like 'movie';")
         result = cursor.fetchall()
@@ -197,8 +176,6 @@ def reset():
             print("table dropped")
 
     initialize_database()
-    # TODO
-    # YOUR CODE GOES HERE
 
 
 # Problem 2 (4 pt.)
@@ -233,8 +210,6 @@ def print_movies():
             print(strFormat % print_values) # 너무 길어서 적당히 잘라서 출력
         print('-' * 100)
 
-    # YOUR CODE GOES HERE
-
 # Problem 3 (3 pt.)
 def print_users():
     # YOUR CODE GOES HERE
@@ -252,8 +227,6 @@ def print_users():
             print(strFormat % print_values)
         print('-' * 60)
 
-    # YOUR CODE GOES HERE
-
 
 # Problem 4 (4 pt.)
 def insert_movie():
@@ -263,8 +236,6 @@ def insert_movie():
     price = int(input('Movie price: ')) # 무조건 정수 입력된다고 가정 - qna로부터
     if price < 0 or price > 100000:
         print('Movie price should be from 0 to 100000')
-        if DEBUG:
-            print(type(price))
         return
 
     with connection.cursor(dictionary=True, buffered=True) as cursor:
@@ -293,6 +264,7 @@ def remove_movie():
         if cnt == 0:
             print(f'Movie {movie_id} does not exist')
             return
+        # moviecustomer, movie row remove
         cursor.execute("delete from moviecustomer where movie_id = %s;", (movie_id,))
         cursor.execute("delete from movie where id = %s;", (movie_id,))
         connection.commit()
@@ -300,10 +272,9 @@ def remove_movie():
 
 # Problem 5 (4 pt.)
 def insert_user():
-    # YOUR CODE GOES HERE
     name = input('User name: ')
     age = int(input('User age: '))
-    class_ = input('User class: ').lower() # name, title 등은 대소문자를 구분하나, class는 구분하지 않는다고 가정
+    class_ = input('User class: ').lower() # class는 대소문자를 구분하지 않는다고 가정
     if age < 12 or age > 110:
         print('User age should be from 12 to 110')
         return
@@ -317,14 +288,13 @@ def insert_user():
         if cnt != 0:
             print(f'The user ({name}, {age}) already exists')
             return
-
+        # insert user
         cursor.execute("insert into customer (name, age, class) values (%s, %s, %s);", (name, age, class_))
         connection.commit()
         print('One user successfully inserted')
 
 # Problem 7 (4 pt.)
 def remove_user():
-    # YOUR CODE GOES HERE
     user_id = int(input('User ID: '))
     with connection.cursor(dictionary=True, buffered=True) as cursor:
         cursor.execute("select * from customer where id = %s;", (user_id,))
@@ -332,15 +302,14 @@ def remove_user():
         if cnt == 0:
             print(f'User {user_id} does not exist')
             return
+        # moviecustomer, customer row delete
         cursor.execute("delete from moviecustomer where customer_id = %s;", (user_id,))
         cursor.execute("delete from customer where id = %s;", (user_id,))
         connection.commit()
         print('One user successfully removed')
-    # TODO: delete 평점
 
 # Problem 8 (5 pt.)
 def book_movie():
-    # YOUR CODE GOES HERE
     movie_id = int(input('Movie ID: '))
     user_id = int(input('User ID: '))
 
@@ -375,20 +344,15 @@ def book_movie():
             # row exists
             print(f'User {user_id} already booked movie {movie_id}')
             return
-
-        #cursor.execute("update moviecustomer set reserve_price = %s where movie_id = %s and customer_id = %s;", (reserve_price, movie_id, user_id))
-
         else:
             # row not exists
             # not reserved yet
             cursor.execute("insert into moviecustomer values (%s, %s, %s, %s);", (movie_id, user_id, None, reserve_price))
     connection.commit()
     print('Movie successfully booked')
-    # YOUR CODE GOES HERE
 
 # Problem 9 (5 pt.)
 def rate_movie():
-    # YOUR CODE GOES HERE
     movie_id = int(input('Movie ID: '))
     user_id = int(input('User ID: '))
     rating = int(input('Ratings (1~5): '))
@@ -423,7 +387,6 @@ def rate_movie():
     # success message
     connection.commit()
     print('Movie successfully rated')
-    # YOUR CODE GOES HERE
 
 # Problem 10 (5 pt.)
 def print_users_for_movie():
@@ -436,11 +399,9 @@ def print_users_for_movie():
             print(f'Movie {movie_id} does not exist')
             return
 
-        # TODO: moviecustomer 없는 경우? -> 생각해보니 그런경우는업따.
-
         cursor.execute("select id, name, age, reserve_price, score from customer, moviecustomer \
                         where customer.id = moviecustomer.customer_id and movie_id = %s \
-                        order by id asc;", (movie_id,))
+                        order by id asc;", (movie_id,)) # 해당 movie 예매한 users
         result = cursor.fetchall()
 
         print_col_names = ('id', 'name', 'age', 'res.price', 'rating')
@@ -458,12 +419,8 @@ def print_users_for_movie():
         print('-' * 60)
 
 
-    # YOUR CODE GOES HERE
-
-
 # Problem 11 (5 pt.)
 def print_movies_for_user():
-    # YOUR CODE GOES HERE
     user_id = int(input('User ID: '))
     with connection.cursor(dictionary=True, buffered=True) as cursor:
         cursor.execute("select * from customer where id = %s;", (user_id,))
@@ -472,12 +429,11 @@ def print_movies_for_user():
             print(f'User {user_id} does not exist')
             return
 
-        # TODO
         cursor.execute("select id, title, director, reserve_price, score \
                        from movie, moviecustomer \
                        where movie.id = moviecustomer.movie_id and \
                        moviecustomer.customer_id = %s \
-                       order by id asc;", (user_id, ))
+                       order by id asc;", (user_id, )) # 해당 user가 예매한 movies
         result = cursor.fetchall()
 
         print_col_names = ("id", "title", "director", "res. price", "rating")
@@ -498,9 +454,6 @@ def print_movies_for_user():
             print(strFormat % print_values) # 너무 길어서 적당히 잘라서 출력
         print('-' * 80)
 
-    # YOUR CODE GOES HERE
-
-
 # Problem 12 (6 pt.)
 def recommend_popularity():
     user_id = int(input('User ID: '))
@@ -510,23 +463,6 @@ def recommend_popularity():
         if cnt == 0:
             print(f'User {user_id} does not exist')
             return
-
-        # TODO
-        '''cursor.execute("select id, title, reserve_price, cnt(customer_id), avg(score) \
-                       from movie, moviecustomer \
-                       where movie.id = moviecustomer.movie_id and \
-                       (moviecustomer.customer_id <> %s or \
-                       (moviecustomer.customer_id = %s and moviecustomer.reserve = %s)) \
-                       avg(score) >= all ( \
-                       select avg(score) from moviecustomer \
-                       where (moviecustomer.customer_id <> %s or \
-                       (moviecustomer.customer_id = %s and moviecustomer.reserve = %s)) \
-                       group by movie.id; ) \
-                       group by movie.id;")
-        cnt = cursor.rowcount
-        if cnt == 0:
-            pass
-        elif cnt > 1:'''
 
         # TODO: user가 예매한 id는 continue
         cursor.execute("select id from movie, moviecustomer where movie.id = moviecustomer.movie_id \
@@ -611,7 +547,6 @@ def recommend_popularity():
             # TODO: 모든 영화의 관객이 0명인 경우? 현재는 id가 작은 영화를 추천할 듯
 
         # print
-        # TODO: 두 영화가 같은 경우?
         # 두 영화가 같은 경우, 해당 영화(하나)만 추천하는 것으로 가정
         cursor.execute("select class from customer where id = %s;", (user_id,))
         result = cursor.fetchone()
@@ -629,26 +564,36 @@ def recommend_popularity():
 
 
 
-        print_col_names = ("id", "title", "res. price", "reservation", "avg. rating")
 
-        print('-' * 80)
-        strFormat = "%-4s%-40s%-12s%-12s%-12s"
-        print(strFormat % print_col_names)
-        print('-' * 80)
         if max_score is None:
             max_score_print = "None"
         else:
             max_score_print = round(max_score, 2)
-        print_values = (max_score_id, max_score_title[0:39], round(max_score_reserve_price, 2), max_score_customers_cnt, max_score_print)
-        print(strFormat % print_values)
-        if max_customers_id != max_score_id:
-            if max_customers_score is None:
-                max_customers_score_print = "None"
-            else:
-                max_customers_score_print = round(max_customers_score, 2)
-            print_values = (max_customers_id, max_customers_title[0:39], round(max_customers_reserve_price, 2), max_customers, max_customers_score_print)
-            print(strFormat % print_values)
+        max_score_print_values = (max_score_id, max_score_title[0:39], round(max_score_reserve_price, 2), max_score_customers_cnt, max_score_print)
+        if max_customers_score is None:
+            max_customers_score_print = "None"
+        else:
+            max_customers_score_print = round(max_customers_score, 2)
+        max_customers_print_values = (max_customers_id, max_customers_title[0:39], round(max_customers_reserve_price, 2), max_customers, max_customers_score_print)
+
+        # id가 작은 영화부터 출력
+
+
+        strFormat = "%-4s%-40s%-12s%-12s%-12s"
+        print_col_names = ("id", "title", "res. price", "reservation", "avg. rating")
+
         print('-' * 80)
+        print("Rating-based")
+        print(strFormat % print_col_names)
+        print('-' * 80)
+        print(strFormat % max_score_print_values)
+        print('-' * 80)
+        print("Popularity-based")
+        print(strFormat % print_col_names)
+        print('-' * 80)
+        print(strFormat % max_customers_print_values)
+        print('-' * 80)
+
 
 # Problem 13 (10 pt.)
 def recommend_item_based():
@@ -671,7 +616,7 @@ def recommend_item_based():
 
         # 어떤 영화에도 평점을 매기지 않은 고객은 matrix를 생성 시 제외
         cursor.execute("select customer_id, count(score) from moviecustomer \
-                        group by customer_id;") # score가 null이면 자동 제외
+                        group by customer_id order by customer_id asc;") # score가 null이면 자동 제외
         result = cursor.fetchall()
         matrix_users = [] # matrix의 user order
         for row in result:
@@ -706,11 +651,11 @@ def recommend_item_based():
                     cnt += 1
                     avg += matrix_item[i][current_movie]
             if cnt == 0:
-                continue
+                continue # 평점이 없는 영화는 모두 0으로 초기화 - 이미 0으로 초기화하였으므로 건드리지 않으면 된다.
             avg /= cnt
             for i in range(len(matrix_item)):
                 if matrix_item[i][current_movie] == 0:
-                    matrix_item[i][current_movie] = avg
+                    matrix_item[i][current_movie] = round(avg, 2) # - 각 평점은 소수점 2자리까지 출력한다.
 
         if DEBUG:
             for i in range(user_cnt):
@@ -719,7 +664,7 @@ def recommend_item_based():
                 print()
 
         matrix_similarity = [[0 for _ in range(movie_cnt)] for _ in range(movie_cnt)]
-        # TODO: movie * movie 맞나
+        # cosine similarity 계산
         matrix_item_avg = 0
         for i in range(len(matrix_item)):
             for j in range(len(matrix_item[0])):
@@ -744,12 +689,12 @@ def recommend_item_based():
                     sum_sqrt_a = pow(sum_sqrt_a, 0.5)
                     sum_sqrt_b = pow(sum_sqrt_b, 0.5)
 
-                    matrix_similarity[i][j] = round(sum_ab / (sum_sqrt_a * sum_sqrt_b), 5)
+                    matrix_similarity[i][j] = round(sum_ab / (sum_sqrt_a * sum_sqrt_b), 4)
 
                 else:
-                    continue # symmetric
+                    continue
 
-        for i in range(movie_cnt):
+        for i in range(movie_cnt): # symmetric
             for j in range(movie_cnt):
                 if i<=j:
                     continue
@@ -768,14 +713,13 @@ def recommend_item_based():
         result = cursor.fetchall()
         scored_movies_idx = []
         for row in result:
-            scored_movies_idx.append(movie_ids.index(row["movie_id"]))
-
+            scored_movies_idx.append(movie_ids.index(row["movie_id"])) # current user가 평점을 준 영화 - 임시 평점 계산 제외
 
         cursor.execute("select movie_id from moviecustomer where customer_id = %s;", (user_id,))
         result = cursor.fetchall()
         watched_movies_idx = []
         for row in result:
-            watched_movies_idx.append(movie_ids.index(row["movie_id"]))
+            watched_movies_idx.append(movie_ids.index(row["movie_id"])) # current user가 관람한 영화 - 추천 제외
 
         i = matrix_users.index(user_id)
         pred_scores = matrix_item[i].copy() # deep copy
@@ -796,8 +740,7 @@ def recommend_item_based():
                 if DEBUG:
                     print(f"{current_weight}    {matrix_item[i][k]}")
             weighted_sum /= weights
-            pred_scores[j] = weighted_sum
-            # TODO: 임시 평점도 써야 함
+            pred_scores[j] = round(weighted_sum, 2)
 
         if DEBUG:
             print(pred_scores)
@@ -807,7 +750,8 @@ def recommend_item_based():
             if j not in watched_movies_idx:
                 predicted_scores_dict[j] = pred_scores[j] # {index : predicted score}
 
-        recommend_dict = sorted(predicted_scores_dict.items(), key=lambda item: item[1], reverse=True)
+        recommend_dict = sorted(predicted_scores_dict.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        # predicted score가 같으면 index가 작은 게 우선 -> index가 작은 것은 id도 작다.
         if DEBUG:
             print(recommend_dict)
         # predicted score의 내림차순으로 sort
@@ -823,6 +767,7 @@ def recommend_item_based():
         result = cursor.fetchone()
         class_ = result["class"]
 
+        # print
         cnt = 0
         for index, predicted_score in recommend_dict:
             if index in watched_movies_idx:
@@ -839,7 +784,7 @@ def recommend_item_based():
 
             reserve_price = get_reserve_price(price, class_)
 
-            print_values = (id, title, reserve_price, avg_score, round(predicted_score, 5))
+            print_values = (id, title, reserve_price, avg_score, round(predicted_score, 2))
 
             print(strFormat % print_values)
             cnt += 1

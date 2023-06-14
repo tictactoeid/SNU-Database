@@ -1,4 +1,2 @@
-pymysql
-numpy
 pandas
 mysql-connector-python
